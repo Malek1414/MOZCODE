@@ -1,0 +1,34 @@
+{
+  "name": "terse-mcp",
+  "version": "0.1.0",
+  "description": "Symbol-level MCP server for Claude Code — returns symbols and outlines instead of whole files, cutting input-token consumption. Clean-room OSS.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "terse-mcp": "dist/server.js"
+  },
+  "files": [
+    "dist",
+    "grammars",
+    "hooks",
+    "skills",
+    ".mcp.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "dev": "tsx src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.19.1",
+    "tree-sitter-wasms": "^0.1.12",
+    "web-tree-sitter": "^0.25.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "terse": {
+      "command": "node",
+      "args": ["--no-warnings", "${CLAUDE_PLUGIN_ROOT}/dist/server.js"],
+      "alwaysLoad": true
+    }
+  }
+}
