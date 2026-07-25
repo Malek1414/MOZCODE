@@ -171,17 +171,30 @@ export function renderDashboard(summary: Summary, generatedAt = new Date()): str
       --grid:#e5eae6; --border:rgba(16,23,19,.10); --good:#087a4f; --bar-track:#edf1ee;
       --series-1:#2367e8; --series-2:#00a979; --series-3:#e29a13; --series-4:#7457d9;
       --series-5:#7457d9; --series-6:#e34948; --shadow:0 18px 60px rgba(27,48,35,.07);
+      /* Layered ambient background (blue port of WOZCODE's glow) — light values */
+      --bg-base:linear-gradient(#eef2f7 0%,#f4f6f4 60%,#eef1f5 100%);
+      --glow-1:rgba(35,103,232,.10); --glow-2:rgba(91,145,255,.08); --glow-3:rgba(35,103,232,.07); --glow-4:rgba(210,220,235,.55);
+      --dot:rgba(16,23,40,.05); --vignette:rgba(30,50,90,.05);
       font-family:'Saira',system-ui,-apple-system,"Segoe UI",sans-serif;
       color:var(--text-primary); min-height:100vh; margin:0; padding:26px; box-sizing:border-box;
-      background:radial-gradient(circle at 8% 0%,rgba(35,103,232,.08),transparent 28rem),
-        radial-gradient(circle at 100% 28%,rgba(0,169,121,.055),transparent 34rem),var(--page);
+      /* Layered ambient backdrop painted on the element itself (attachment:fixed
+         so it reads like a viewport glow), blue port of WOZCODE's corner stack:
+         vignette · dot grid · 3 blue corner glows · neutral glow · base gradient. */
+      background:
+        radial-gradient(at 50% 55%,transparent 30%,var(--vignette) 100%) fixed,
+        radial-gradient(var(--dot) 1px,transparent 1px) 0 0/28px 28px fixed,
+        radial-gradient(80% 60% at 0% 0%,var(--glow-1),transparent 55%) fixed,
+        radial-gradient(70% 60% at 100% 0%,var(--glow-2),transparent 55%) fixed,
+        radial-gradient(90% 70% at 50% 100%,var(--glow-3),transparent 55%) fixed,
+        radial-gradient(60% 50% at 100% 100%,var(--glow-4),transparent 60%) fixed,
+        var(--bg-base) fixed;
     }
     @media (prefers-color-scheme: dark){
       .viz-root{--surface-1:#151b17;--page:#0c100e;--raise:#151b17;--text-primary:#f4f8f5;--text-secondary:#b9c4bc;--muted:#7f8c83;--grid:#28312b;--border:rgba(237,248,240,.09);--good:#43d99e;--bar-track:#222b25;
-        --series-1:#5b91ff;--series-2:#33d6a3;--series-3:#f0b64e;--series-4:#9d88f2;--series-5:#9d88f2;--series-6:#e66767;--shadow:0 22px 70px rgba(0,0,0,.28)}
+        --series-1:#5b91ff;--series-2:#33d6a3;--series-3:#f0b64e;--series-4:#9d88f2;--series-5:#9d88f2;--series-6:#e66767;--shadow:0 22px 70px rgba(0,0,0,.28);--bg-base:linear-gradient(#18213a 0%,#0c1018 58%,#05070c 100%);--glow-1:rgba(35,103,232,.36);--glow-2:rgba(91,145,255,.28);--glow-3:rgba(45,120,255,.42);--glow-4:rgba(28,38,58,.85);--dot:rgba(255,255,255,.11);--vignette:rgba(0,0,0,.36)}
     }
-    :root[data-theme="dark"] .viz-root{--surface-1:#151b17;--page:#0c100e;--raise:#151b17;--text-primary:#f4f8f5;--text-secondary:#b9c4bc;--muted:#7f8c83;--grid:#28312b;--border:rgba(237,248,240,.09);--good:#43d99e;--bar-track:#222b25;--series-1:#5b91ff;--series-2:#33d6a3;--series-3:#f0b64e;--series-4:#9d88f2;--series-5:#9d88f2;--series-6:#e66767;--shadow:0 22px 70px rgba(0,0,0,.28)}
-    :root[data-theme="light"] .viz-root{--surface-1:#fff;--page:#f4f6f4;--raise:#fff;--text-primary:#101713;--text-secondary:#47534b;--muted:#78827b;--grid:#e5eae6;--border:rgba(16,23,19,.10);--good:#087a4f;--bar-track:#edf1ee;--series-1:#2367e8;--series-2:#00a979;--series-3:#e29a13;--series-4:#7457d9;--series-5:#7457d9;--series-6:#e34948;--shadow:0 18px 60px rgba(27,48,35,.07)}
+    :root[data-theme="dark"] .viz-root{--surface-1:#151b17;--page:#0c100e;--raise:#151b17;--text-primary:#f4f8f5;--text-secondary:#b9c4bc;--muted:#7f8c83;--grid:#28312b;--border:rgba(237,248,240,.09);--good:#43d99e;--bar-track:#222b25;--series-1:#5b91ff;--series-2:#33d6a3;--series-3:#f0b64e;--series-4:#9d88f2;--series-5:#9d88f2;--series-6:#e66767;--shadow:0 22px 70px rgba(0,0,0,.28);--bg-base:linear-gradient(#18213a 0%,#0c1018 58%,#05070c 100%);--glow-1:rgba(35,103,232,.36);--glow-2:rgba(91,145,255,.28);--glow-3:rgba(45,120,255,.42);--glow-4:rgba(28,38,58,.85);--dot:rgba(255,255,255,.11);--vignette:rgba(0,0,0,.36)}
+    :root[data-theme="light"] .viz-root{--surface-1:#fff;--page:#f4f6f4;--raise:#fff;--text-primary:#101713;--text-secondary:#47534b;--muted:#78827b;--grid:#e5eae6;--border:rgba(16,23,19,.10);--good:#087a4f;--bar-track:#edf1ee;--series-1:#2367e8;--series-2:#00a979;--series-3:#e29a13;--series-4:#7457d9;--series-5:#7457d9;--series-6:#e34948;--shadow:0 18px 60px rgba(27,48,35,.07);--bg-base:linear-gradient(#eef2f7 0%,#f4f6f4 60%,#eef1f5 100%);--glow-1:rgba(35,103,232,.10);--glow-2:rgba(91,145,255,.08);--glow-3:rgba(35,103,232,.07);--glow-4:rgba(210,220,235,.55);--dot:rgba(16,23,40,.05);--vignette:rgba(30,50,90,.05)}
     .viz-root *{box-sizing:border-box}
     .shell{width:min(1380px,100%);margin:0 auto}
     .topbar{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:4px 2px 22px}

@@ -11,7 +11,7 @@ function wrap(body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MOZCODE — savings dashboard</title>
-<style>html,body{margin:0;padding:0;background:#f9f9f7}@media(prefers-color-scheme:dark){html,body{background:#0d0d0d}}</style>
+<style>html,body{margin:0;padding:0;background:#eef2f7}@media(prefers-color-scheme:dark){html,body{background:#05070c}}</style>
 </head>
 <body>
 ${body}
