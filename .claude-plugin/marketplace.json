@@ -1,5 +1,6 @@
 {
   "name": "mozcode",
+  "description": "Local symbol-level code intelligence for Claude Code with AST navigation, precise edits, database discovery, and savings reporting.",
   "owner": { "name": "Malek1414" },
   "plugins": [
     {

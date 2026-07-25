@@ -11,8 +11,5 @@
       "args": ["--no-warnings", "${CLAUDE_PLUGIN_ROOT}/dist/server.js"],
       "alwaysLoad": true
     }
-  },
-  "hooks": "./hooks/hooks.json",
-  "commands": "./commands",
-  "agents": "./agents"
+  }
 }
