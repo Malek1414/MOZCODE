@@ -10,15 +10,18 @@ import { dirname, join } from "node:path";
 const require = createRequire(import.meta.url);
 const root = process.cwd();
 
-// 1) Bundle the server (ESM, node) into a single file.
+// 1) Bundle the server + statusline (ESM, node) into single files.
 rmSync(join(root, "dist"), { recursive: true, force: true });
 await build({
-  entryPoints: [join(root, "src/server.ts")],
+  entryPoints: [
+    join(root, "src/server.ts"),
+    join(root, "src/statusline.ts"),
+  ],
   bundle: true,
   platform: "node",
   format: "esm",
   target: "node18",
-  outfile: join(root, "dist/server.js"),
+  outdir: join(root, "dist"),
   sourcemap: false,
   logLevel: "info",
   banner: {

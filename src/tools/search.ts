@@ -113,7 +113,7 @@ export async function codeSearch(
     for (const { sym, count, lines } of seen.values()) {
       const locations = lines.map((line) => `L${line}`).join(",");
       parts.push(
-        `  ${sym.qualifiedName} ⟨${sym.kind} L${sym.startLine}-${sym.endLine}; ${count > 1 ? `${count} hits ` : "hit "}${locations}⟩`,
+        `  ${sym.qualifiedName} [${sym.kind} L${sym.startLine}-${sym.endLine}; ${count > 1 ? `${count} hits ` : "hit "}${locations}]`,
       );
     }
     for (const m of looseLines) parts.push(`  L${m.line}: ${m.text}`);

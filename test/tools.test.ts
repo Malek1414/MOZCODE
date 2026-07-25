@@ -12,13 +12,31 @@ const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (f: string) => join(here, "fixtures", f);
 
 describe("code_outline", () => {
-  it("returns a symbol skeleton far smaller than the file", async () => {
+  it("returns a symbol skeleton that lists signatures but omits bodies", async () => {
     const r = await codeOutline(fixture("sample.ts"), "sample.ts");
     expect(r.degraded).toBe(false);
     expect(r.text).toContain("function add(a: number, b: number): number");
     expect(r.text).toContain("class Account");
-    expect(r.meta.savedTokens).toBeGreaterThan(0);
+    // The skeleton is signatures only — implementation bodies are dropped.
+    expect(r.text).not.toContain("return a + b");
+    expect(r.text).not.toContain("this.balance += amount");
+  });
+
+  it("saves tokens on a realistically-sized file", async () => {
+    // The outline win is proportional to body size: on a toy file the skeleton
+    // can rival the source, but on a normal file dropping bodies saves a lot.
+    const fn = (i: number) =>
+      `export function op${i}(a: number, b: number): number {\n` +
+      `  const scratch = a * ${i} + b;\n` +
+      `  let acc = 0;\n` +
+      `  for (let k = 0; k < scratch; k++) acc += (k % 7) * ${i};\n` +
+      `  return acc + scratch;\n}\n`;
+    const p = join(tmpdir(), `mozcode-outline-${Date.now()}.ts`);
+    await fs.writeFile(p, Array.from({ length: 40 }, (_, i) => fn(i)).join("\n"));
+    const r = await codeOutline(p, "big.ts");
+    expect(r.degraded).toBe(false);
     expect(r.meta.actualTokens).toBeLessThan(r.meta.baselineTokens);
+    expect(r.meta.savedTokens).toBeGreaterThan(0);
   });
 
   it("degrades gracefully on an unsupported language", async () => {
@@ -61,14 +79,14 @@ describe("code_search", () => {
     const r = await codeSearch(join(here, "fixtures"), "balance");
     expect(r.text).toContain("Account.constructor");
     expect(r.text).toContain("Account.deposit");
-    expect(r.text).toMatch(/Account\.deposit ⟨method L\d+-\d+; hit L\d+⟩/);
-    expect(r.text).not.toContain("⟨top-level⟩");
+    expect(r.text).toMatch(/Account\.deposit \[method L\d+-\d+; hit L\d+\]/);
+    expect(r.text).not.toContain("[top-level]");
     expect(r.meta.baselineTokens).toBeGreaterThan(0);
   });
 
   it("uses the match offset to recognize exported declarations", async () => {
     const r = await codeSearch(join(here, "fixtures"), "function add");
-    expect(r.text).toMatch(/  add ⟨function L\d+-\d+; hit L\d+⟩/);
+    expect(r.text).toMatch(/  add \[function L\d+-\d+; hit L\d+\]/);
     expect(r.text).not.toContain("export function add");
   });
 

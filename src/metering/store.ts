@@ -54,6 +54,39 @@ export async function record(
   }
 }
 
+function sessionsDir(): string {
+  return path.join(mozcodeHome(), "sessions");
+}
+
+function sessionPointerFile(project: string): string {
+  const hash = crypto.createHash("sha1").update(project).digest("hex").slice(0, 12);
+  return path.join(sessionsDir(), `${hash}.session`);
+}
+
+/**
+ * Record which metering session is currently active for a project, so an
+ * out-of-process reader (the statusline) can attribute "this session" savings
+ * exactly. Best-effort — never throws into the server startup path.
+ */
+export async function writeCurrentSession(project: string, session: string): Promise<void> {
+  try {
+    await fs.mkdir(sessionsDir(), { recursive: true });
+    await fs.writeFile(sessionPointerFile(project), session, "utf8");
+  } catch {
+    // Pointer is a convenience; the statusline falls back to the latest entry.
+  }
+}
+
+/** Read the active session id for a project, or undefined if none is recorded. */
+export async function readCurrentSession(project: string): Promise<string | undefined> {
+  try {
+    const s = (await fs.readFile(sessionPointerFile(project), "utf8")).trim();
+    return s || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Load all metering entries across every project. */
 export async function loadEntries(): Promise<MeteringEntry[]> {
   const dir = meteringDir();

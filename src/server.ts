@@ -9,7 +9,7 @@ import { codeRead } from "./tools/read.js";
 import { codeSearch } from "./tools/search.js";
 import { codeEdit } from "./tools/edit.js";
 import { dbSchema } from "./db/schema.js";
-import { record, loadEntries, summarize, mozcodeHome } from "./metering/store.js";
+import { record, loadEntries, summarize, mozcodeHome, writeCurrentSession } from "./metering/store.js";
 import { SUPPORTED_LANGUAGES } from "./ast/languages.js";
 import type { ToolResult } from "./tools/types.js";
 import { generateDashboard, openInBrowser } from "./dashboard/generate.js";
@@ -201,6 +201,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 });
 
 async function main(): Promise<void> {
+  // Publish the active session for this project so the statusline can attribute
+  // "this session" savings exactly (SESSION is per-process, not Claude's id).
+  await writeCurrentSession(PROJECT, SESSION);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // eslint-disable-next-line no-console

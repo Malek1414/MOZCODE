@@ -9,7 +9,7 @@ export function renderOutline(symbols: Symbol[], relPath: string): string {
   const lines = symbols.map((s) => {
     const indent = "  ".repeat(s.depth);
     const loc = `L${s.startLine}-${s.endLine}`;
-    return `${indent}${s.signature}   ⟨${s.kind} ${loc}⟩`;
+    return `${indent}${s.signature}   [${s.kind} ${loc}]`;
   });
   return `${relPath}  —  outline (${symbols.length} symbols):\n${lines.join("\n")}`;
 }
