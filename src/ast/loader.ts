@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Parser, Language } from "web-tree-sitter";
 import { GRAMMAR_FILE, type LanguageId } from "./languages.js";
 
@@ -9,27 +10,44 @@ const require = createRequire(import.meta.url);
 let initPromise: Promise<void> | null = null;
 const languageCache = new Map<LanguageId, Promise<Language>>();
 
-/** Directory containing the grammar .wasm files. */
-function grammarsDir(): string {
-  // Preferred: the bundled grammars/ dir at the package root (production).
-  const bundled = path.resolve(fileDir(), "..", "..", "grammars");
-  if (fs.existsSync(path.join(bundled, GRAMMAR_FILE.typescript))) return bundled;
-  // Fallback: resolve straight from the tree-sitter-wasms package (dev/test).
+function fileDir(): string {
+  return path.dirname(fileURLToPath(import.meta.url));
+}
+
+/**
+ * Directory holding the wasm assets (grammars + the web-tree-sitter runtime).
+ * Works in three layouts:
+ *   1. Bundled plugin:  <root>/dist/server.js  → <root>/grammars   (walk up)
+ *   2. tsc build:       <root>/dist/ast/loader.js → <root>/grammars (walk up)
+ *   3. Dev (no build):  fall back to the tree-sitter-wasms package.
+ */
+function assetsDir(): string {
+  let dir = fileDir();
+  for (let i = 0; i < 6; i++) {
+    const g = path.join(dir, "grammars");
+    if (fs.existsSync(path.join(g, GRAMMAR_FILE.typescript))) return g;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Dev fallback: grammars straight from the installed package.
   const pkg = require.resolve("tree-sitter-wasms/package.json");
   return path.join(path.dirname(pkg), "out");
 }
 
-function fileDir(): string {
-  return path.dirname(new URL(import.meta.url).pathname);
+/** Path to the web-tree-sitter runtime wasm — shipped alongside grammars, or resolved in dev. */
+function runtimeWasm(): string {
+  const shipped = path.join(assetsDir(), "tree-sitter.wasm");
+  if (fs.existsSync(shipped)) return shipped;
+  return require.resolve("web-tree-sitter/tree-sitter.wasm");
 }
 
 /** Initialize the tree-sitter WASM runtime exactly once. */
 export async function initParser(): Promise<void> {
   if (!initPromise) {
-    const runtimeWasm = require.resolve("web-tree-sitter/tree-sitter.wasm");
+    const rt = runtimeWasm();
     initPromise = Parser.init({
-      locateFile: (name: string) =>
-        name.endsWith(".wasm") ? runtimeWasm : name,
+      locateFile: (name: string) => (name.endsWith(".wasm") ? rt : name),
     } as never);
   }
   return initPromise;
@@ -41,8 +59,7 @@ export async function loadLanguage(id: LanguageId): Promise<Language> {
   if (!cached) {
     cached = (async () => {
       await initParser();
-      const wasmPath = path.join(grammarsDir(), GRAMMAR_FILE[id]);
-      return Language.load(wasmPath);
+      return Language.load(path.join(assetsDir(), GRAMMAR_FILE[id]));
     })();
     languageCache.set(id, cached);
   }

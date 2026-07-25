@@ -1,9 +1,9 @@
 node_modules/
-dist/
 *.log
 .DS_Store
-grammars/*.wasm
-!grammars/.gitkeep
+
+# dist/ (bundled server) and grammars/*.wasm ARE committed so the plugin is
+# installable with no build step. Do not ignore them.
 
 # Local research doc — kept out of the public repo
 wozcode-teardown.md

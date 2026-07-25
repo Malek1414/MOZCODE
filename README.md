@@ -30,7 +30,6 @@ file on your disk.
 - [The savings dashboard](#the-savings-dashboard)
 - [Architecture](#architecture)
 - [Tech stack](#tech-stack)
-- [Install & build](#install--build)
 - [Attach as a plugin to Claude Code](#attach-as-a-plugin-to-claude-code)
 - [Commands](#commands)
 - [Development](#development)
@@ -171,51 +170,35 @@ hook surface to a single SessionStart nudge rather than intercepting every tool 
 | Tests | Vitest — engine, tools, metering, dashboard, and a real stdio integration test |
 | Dashboard | Hand-rolled inline SVG (validated data-viz palette), Saira font embedded as base64 |
 
-## Install & build
-
-Requires Node 18+.
-
-```bash
-git clone https://github.com/Malek1414/MOZCODE.git
-cd MOZCODE
-npm install
-npm run build        # tsc → dist/, and bundles grammar .wasm into grammars/
-npm test             # optional: 32 tests should pass
-```
-
-`npm run build` is required before the MCP server can run (it produces
-`dist/server.js` and copies the tree-sitter grammars).
-
 ## Attach as a plugin to Claude Code
 
-MOZCODE is a Claude Code plugin. After building (above), register this directory as
-a local plugin marketplace and install it:
+MOZCODE ships **pre-bundled** — `dist/server.js` is a single self-contained file
+with every dependency inlined, and the tree-sitter wasm grammars are committed
+alongside it. There is **no build step and no `npm install`**. You only need Node 18+
+(which Claude Code already requires).
 
 ```
 # In Claude Code:
-/plugin marketplace add /absolute/path/to/MOZCODE
+/plugin marketplace add Malek1414/MOZCODE
 /plugin install mozcode@mozcode
 ```
 
-Then restart the session (or reload plugins). Verify it's live:
+(Or point at a local clone: `/plugin marketplace add /absolute/path/to/MOZCODE`.)
+
+Then reload plugins / restart the session and verify it's live:
 
 ```
 /moz-status
 ```
 
-You should see the supported languages and the metering store path. From then on,
-the model will prefer MOZCODE's symbol-level tools for code, and you can check
-savings any time with `/moz-savings` or open the dashboard with `/moz-dashboard`.
+You should see the supported languages and the metering store path. From then on
+the model will prefer MOZCODE's symbol-level tools for code; check savings any time
+with `/moz-savings`, or open the dashboard with `/moz-dashboard`.
 
-> **Note:** the plugin runs the compiled server at `${CLAUDE_PLUGIN_ROOT}/dist/server.js`
-> and imports its dependencies from `node_modules/`, so keep this built directory
-> intact (don't delete `dist/` or `node_modules/` after install). A future release
-> will ship a pre-bundled server so no local build step is needed.
-
-Running the server standalone (for debugging) is just:
+Running the bundled server standalone (for debugging) needs nothing installed:
 
 ```bash
-node --no-warnings dist/server.js   # speaks MCP over stdio
+node --no-warnings dist/server.js   # speaks MCP over stdio, no node_modules required
 ```
 
 ## Commands
@@ -228,11 +211,19 @@ node --no-warnings dist/server.js   # speaks MCP over stdio
 
 ## Development
 
+Contributors (not needed to *use* the plugin — only to change it):
+
 ```bash
+npm install          # dev dependencies
 npm run dev          # run the server from source (tsx), for iteration
-npm test             # full suite
-npm run build        # compile + bundle grammars
+npm test             # full suite (32 tests)
+npm run typecheck    # tsc --noEmit
+npm run build        # esbuild → self-contained dist/server.js + wasm in grammars/
+node scripts/verify-bundle.mjs   # prove the bundle runs with no node_modules
 ```
+
+The committed `dist/server.js` and `grammars/*.wasm` are the shipped artifacts;
+re-run `npm run build` after changing `src/` and commit the updated bundle.
 
 Design spec: [`docs/superpowers/specs/2026-07-24-mozcode-design.md`](docs/superpowers/specs/2026-07-24-mozcode-design.md).
 
