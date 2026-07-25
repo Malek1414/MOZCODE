@@ -13,6 +13,8 @@
     "hooks",
     "commands",
     "agents",
+    "skills",
+    ".codex-plugin",
     ".claude-plugin",
     ".mcp.json"
   ],

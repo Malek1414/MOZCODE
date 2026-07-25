@@ -53,6 +53,14 @@ describe("six-metric dashboard renderer", () => {
     expect(html).toContain('class="spark"');
   });
 
+  it("renders the responsive activity views and accessible controls", () => {
+    const html = renderDashboard(summarize(dataset));
+    expect(html).toContain("Top optimized files");
+    expect(html).toContain("Session ledger");
+    expect(html).toContain('aria-label="Toggle color theme"');
+    expect(html).toContain('aria-label="Cumulative tokens saved by day"');
+  });
+
   it("handles an empty dataset without crashing", () => {
     const html = renderDashboard(summarize([]));
     expect(html).toContain("No data yet.");

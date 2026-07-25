@@ -1,0 +1,41 @@
+{
+  "name": "mozcode",
+  "version": "0.1.0",
+  "description": "Local symbol-level code intelligence that gives OpenAI models precise AST context instead of whole files.",
+  "author": {
+    "name": "Malek1414",
+    "url": "https://github.com/Malek1414"
+  },
+  "homepage": "https://github.com/Malek1414/MOZCODE",
+  "repository": "https://github.com/Malek1414/MOZCODE",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "codex",
+    "openai",
+    "tree-sitter",
+    "code-intelligence",
+    "token-efficiency"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "MOZCODE",
+    "shortDescription": "Precise code context with fewer tokens.",
+    "longDescription": "MOZCODE gives OpenAI models symbol-level reads, structural search, AST-anchored edits, database schema discovery, and a private local savings dashboard.",
+    "developerName": "Malek1414",
+    "category": "Productivity",
+    "capabilities": [
+      "Local MCP tools",
+      "Code navigation",
+      "AST edits",
+      "Database discovery"
+    ],
+    "defaultPrompt": [
+      "Map this codebase with MOZCODE before editing.",
+      "Find and read the symbol that implements this behavior.",
+      "Show my MOZCODE savings dashboard."
+    ],
+    "brandColor": "#2367E8"
+  }
+}

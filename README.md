@@ -1,7 +1,7 @@
 # MOZCODE
 
-**A symbol-level MCP server for Claude Code.** MOZCODE returns the *symbol you asked
-for* instead of the whole file, so an agentic coding loop spends far fewer input
+**A symbol-level MCP server for Claude Code, Codex, and OpenAI models.** MOZCODE
+returns the *symbol you asked for* instead of the whole file, so an agentic coding loop spends far fewer input
 tokens. It parses source with tree-sitter, hands the model a function/class/method
 (or a collapsed outline) rather than 400 lines of context, anchors edits to AST
 spans so the model never re-reads a file after editing it, and meters the estimated
@@ -51,16 +51,19 @@ npm install
 npm run build
 ```
 
-Then add it to Claude Code as a plugin (point your plugin config at this directory),
-or run the server directly for testing:
+Then add it to Claude Code or Codex as a plugin (point your local plugin marketplace
+at this directory), or run the server directly for testing:
 
 ```bash
 node --no-warnings dist/server.js   # speaks MCP over stdio
 ```
 
-The plugin manifest (`.mcp.json` / `.claude-plugin/plugin.json`) registers the
-`mozcode` MCP server (`alwaysLoad`), a **SessionStart hook** that nudges the model to
-prefer the `code_*` tools for source files, and three commands.
+The Claude manifest (`.claude-plugin/plugin.json`) and universal OpenAI/Codex
+manifest (`.codex-plugin/plugin.json`) register the same local `mozcode` MCP
+server. The OpenAI plugin also bundles a `mozcode` skill that teaches supported
+models when to prefer the symbol-level tools. A **SessionStart hook** nudges the
+model to use `code_*` for source files, and the three dashboard/status commands
+remain available.
 
 ## Commands
 
@@ -73,9 +76,10 @@ prefer the `code_*` tools for source files, and three commands.
 ## The savings dashboard
 
 `/moz-dashboard` reads the metering log and writes a single self-contained,
-theme-aware HTML file to `~/.mozcode/dashboard.html` (no server, works offline):
-headline stat tiles, cumulative savings over time, savings by tool, top files by
-reduction, and a per-session log.
+theme-aware HTML file to `~/.mozcode/dashboard.html` (no server, works offline).
+It includes a measured savings hero, modelled impact metrics, cumulative and
+per-tool charts, top files, a session ledger, a manual theme switch, and fully
+disclosed assumptions.
 
 ### On the honesty of the numbers
 
@@ -89,8 +93,8 @@ on its face.
 ## Architecture
 
 ```javascript
-Claude Code session
-  ├─ .mcp.json spawns  node dist/server.js   (stdio, alwaysLoad)
+Claude Code / Codex / OpenAI model session
+  ├─ .mcp.json spawns  node dist/server.js   (local stdio)
   │     └─ 4 code tools + db_schema + 3 moz_* tools; records metering in-process
   ├─ hooks/session-start.mjs   → CWD + "prefer code_* tools" nudge
   └─ commands/                 → /moz-savings /moz-status /moz-dashboard
