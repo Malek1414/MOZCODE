@@ -1,7 +1,8 @@
 import * as path from "node:path";
 import { languageForPath } from "../ast/languages.js";
-import { extractSymbols, type Symbol } from "../ast/engine.js";
-import { listSourceFiles, matchesGlob, readFileSafe } from "../util/files.js";
+import { type Symbol } from "../ast/engine.js";
+import { analyzeFile, readCachedSource } from "../ast/file-cache.js";
+import { listSourceFiles, matchesGlob } from "../util/files.js";
 import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 
@@ -11,7 +12,7 @@ interface RawMatch {
   file: string;
   line: number;
   text: string;
-  offset: number; // char offset of the line start
+  offset: number; // char offset of the first match on the line
 }
 
 function buildRegex(query: string): RegExp {
@@ -46,7 +47,7 @@ export async function codeSearch(
     if (pathGlob && !matchesGlob(file, pathGlob)) continue;
     let source: string;
     try {
-      source = await readFileSafe(file);
+      source = await readCachedSource(file);
     } catch {
       continue;
     }
@@ -54,8 +55,9 @@ export async function codeSearch(
     const lines = source.split("\n");
     for (let i = 0; i < lines.length; i++) {
       rx.lastIndex = 0;
-      if (rx.test(lines[i])) {
-        matches.push({ file, line: i + 1, text: lines[i].trim(), offset });
+      const match = rx.exec(lines[i]);
+      if (match) {
+        matches.push({ file, line: i + 1, text: lines[i].trim(), offset: offset + match.index });
         if (matches.length >= MAX_MATCHES) break;
       }
       offset += lines[i].length + 1; // + newline
@@ -92,8 +94,7 @@ export async function codeSearch(
       blocks.push(`${rel}:\n${lines.join("\n")}`);
       continue;
     }
-    const source = await readFileSafe(file);
-    const { symbols } = await extractSymbols(source, lang);
+    const { symbols } = await analyzeFile(file);
     const seen = new Map<string, { sym: Symbol; count: number; lines: number[] }>();
     const looseLines: RawMatch[] = [];
     for (const m of fileMatches) {
@@ -110,14 +111,17 @@ export async function codeSearch(
     }
     const parts: string[] = [];
     for (const { sym, count, lines } of seen.values()) {
-      parts.push(`  ${sym.signature}   ⟨${sym.kind} L${sym.startLine}-${sym.endLine}, ${count} hit${count > 1 ? "s" : ""} @ ${lines.join(",")}⟩`);
+      const locations = lines.map((line) => `L${line}`).join(",");
+      parts.push(
+        `  ${sym.qualifiedName} ⟨${sym.kind} L${sym.startLine}-${sym.endLine}; ${count > 1 ? `${count} hits ` : "hit "}${locations}⟩`,
+      );
     }
-    for (const m of looseLines) parts.push(`  L${m.line}: ${m.text}  ⟨top-level⟩`);
+    for (const m of looseLines) parts.push(`  L${m.line}: ${m.text}`);
     blocks.push(`${rel}:\n${parts.join("\n")}`);
   }
 
-  const header = `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by enclosing symbol:`;
-  const text = `${header}\n\n${blocks.join("\n\n")}`;
+  const header = `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
+  const text = `${header}\n${blocks.join("\n")}`;
   return {
     text,
     degraded: false,

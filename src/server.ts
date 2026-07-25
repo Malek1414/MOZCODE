@@ -8,6 +8,7 @@ import { codeOutline } from "./tools/outline.js";
 import { codeRead } from "./tools/read.js";
 import { codeSearch } from "./tools/search.js";
 import { codeEdit } from "./tools/edit.js";
+import { dbSchema } from "./db/schema.js";
 import { record, loadEntries, summarize, mozcodeHome } from "./metering/store.js";
 import { SUPPORTED_LANGUAGES } from "./ast/languages.js";
 import type { ToolResult } from "./tools/types.js";
@@ -59,7 +60,7 @@ const TOOLS = [
   {
     name: "code_search",
     description:
-      "Search the codebase and return matches GROUPED BY their enclosing symbol (signature + location), not raw lines. Prefer this over the built-in Grep for code: it collapses many line hits into the handful of functions/classes that contain them.",
+      "Search the codebase and return matches GROUPED BY their enclosing qualified symbol and locations, not raw lines. Prefer this over the built-in Grep for code: it collapses many line hits into the handful of functions/classes that contain them.",
     inputSchema: {
       type: "object",
       properties: {
@@ -81,6 +82,32 @@ const TOOLS = [
         new_source: { type: "string", description: "The full new source for the symbol, including its signature." },
       },
       required: ["path", "symbol", "new_source"],
+    },
+  },
+  {
+    name: "db_schema",
+    description:
+      "Introspect an entire SQLite or PostgreSQL schema in one compact call instead of discovering it through sequential queries. Returns tables/views, columns, primary/foreign keys, and indexes only — never application rows. For SQLite pass path. For PostgreSQL set DATABASE_URL (or another environment variable) and pass connection_env; never put credentials in tool arguments.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "SQLite database path, absolute or relative to the project. Omit for PostgreSQL.",
+        },
+        connection_env: {
+          type: "string",
+          description: "Environment variable containing a PostgreSQL URL (default DATABASE_URL).",
+        },
+        query: {
+          type: "string",
+          description: "Optional filter matching table, view, column, index, or referenced-table names.",
+        },
+        refresh: {
+          type: "boolean",
+          description: "Bypass the schema cache when the database schema has just changed.",
+        },
+      },
     },
   },
   {
@@ -130,6 +157,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const r = await meter(await codeEdit(abs, rel, String(args.symbol), String(args.new_source)));
         return textResult(r.text, r.degraded && r.text.includes("rejected"));
       }
+      case "db_schema": {
+        const r = await meter(await dbSchema(PROJECT, {
+          path: args.path as string | undefined,
+          connectionEnv: args.connection_env as string | undefined,
+          query: args.query as string | undefined,
+          refresh: args.refresh as boolean | undefined,
+        }));
+        return textResult(r.text);
+      }
       case "moz_savings": {
         const all = summarize(await loadEntries());
         const session = summarize((await loadEntries()).filter((e) => e.session === SESSION));
@@ -144,6 +180,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return textResult(
           `MOZCODE v0.1.0 — active.\n` +
             `• Supported languages (AST): ${SUPPORTED_LANGUAGES.join(", ")} (others fall back to plain reads).\n` +
+            `• Database schema introspection: SQLite + PostgreSQL metadata (db_schema).\n` +
             `• Session: ${SESSION}\n` +
             `• Project: ${PROJECT}\n` +
             `• Metering store: ${mozcodeHome()}/metering/`,

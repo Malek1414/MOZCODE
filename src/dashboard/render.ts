@@ -14,7 +14,7 @@ function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 }
 
-const TOOL_ORDER = ["code_read", "code_outline", "code_search", "code_edit"];
+const TOOL_ORDER = ["code_read", "code_outline", "code_search", "db_schema", "code_edit"];
 
 /** Tiny sparkline for a KPI tile. */
 function sparkline(values: number[], colorVar = "--series-1"): string {
@@ -231,6 +231,7 @@ export function renderDashboard(summary: Summary, generatedAt = new Date()): str
       <li>Latency per avoided round-trip: <strong>${a.latencyPerCallS}s</strong></li>
       <li>Prefill saved: <strong>${a.prefillSecPer1k}s</strong> / 1k tokens</li>
       <li>Search→call factor: <strong>${a.searchCallFactor}</strong></li>
+      <li>DB discovery turns avoided per schema call: <strong>${a.dbCallsAvoidedPerSchema}</strong></li>
       <li>Token estimate: <strong>~4 chars/token</strong></li>
     </ul>
     <p class="foot">MOZCODE is an open-source, clean-room implementation inspired by a public teardown of WOZCODE. Not affiliated with Woz. Typeface: Saira (OFL-1.1).</p>

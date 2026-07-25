@@ -22,6 +22,7 @@ const dataset = [
   entry({ ts: "2026-07-25T10:00:00.000Z", tool: "code_outline", path: "src/b.ts", baselineTokens: 800, actualTokens: 200, savedTokens: 600 }),
   entry({ tool: "code_search", path: undefined, baselineTokens: 300, actualTokens: 60, savedTokens: 240, session: "sess-def456" }),
   entry({ tool: "code_edit", path: "src/a.ts", baselineTokens: 1200, actualTokens: 40, savedTokens: 1160 }),
+  entry({ tool: "db_schema", path: "app.sqlite", baselineTokens: 2000, actualTokens: 500, savedTokens: 1500 }),
 ];
 
 describe("six-metric dashboard renderer", () => {
@@ -62,9 +63,9 @@ describe("six-metric dashboard renderer", () => {
 describe("metric derivations", () => {
   it("derives cost, calls, and time from tokens with stated assumptions", () => {
     const m = computeMetrics(summarize(dataset), []);
-    expect(m.tokensSaved).toBe(900 + 600 + 240 + 1160);
-    // 1 edit + 0.5 * 1 search = 1.5 -> rounds to 2 (banker? Math.round(1.5)=2)
-    expect(m.callsSaved).toBe(2);
+    expect(m.tokensSaved).toBe(900 + 600 + 240 + 1160 + 1500);
+    // 1 edit + 0.5 * 1 search + 9 avoided DB discovery turns = 10.5 -> 11.
+    expect(m.callsSaved).toBe(11);
     expect(m.apiCostSaved).toBeGreaterThan(0);
     expect(m.costSaved).toBeGreaterThanOrEqual(m.apiCostSaved);
     expect(m.timeSavedSec).toBeGreaterThan(0);

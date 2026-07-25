@@ -3,7 +3,7 @@ import { renderDashboard } from "../src/dashboard/render.js";
 import { summarize, type MeteringEntry } from "../src/metering/store.js";
 
 const now = Date.now();
-const tools = ["code_read", "code_read", "code_outline", "code_search", "code_edit"];
+const tools = ["code_read", "code_read", "code_outline", "code_search", "db_schema", "code_edit"];
 const files = [
   "src/server.ts", "src/ast/engine.ts", "src/tools/search.ts",
   "src/metering/store.ts", "README.md", "src/dashboard/render.ts",

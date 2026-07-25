@@ -5,5 +5,6 @@ node_modules/
 # dist/ (bundled server) and grammars/*.wasm ARE committed so the plugin is
 # installable with no build step. Do not ignore them.
 
-# Local research doc — kept out of the public repo
+# Local research / benchmark docs — kept out of the public repo
 wozcode-teardown.md
+benchmark.md

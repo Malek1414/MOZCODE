@@ -1,7 +1,7 @@
 export interface SavingsMeta {
   tool: string;
   path?: string;
-  /** Tokens a naive built-in (Read/Grep) would have returned. */
+  /** Tokens a naive Read/Grep or raw schema-introspection result would return. */
   baselineTokens: number;
   /** Tokens MOZCODE actually returned. */
   actualTokens: number;
@@ -12,7 +12,7 @@ export interface SavingsMeta {
 export interface ToolResult {
   /** The payload shown to the model. */
   text: string;
-  /** True when MOZCODE fell back to a plain read instead of symbol extraction. */
+  /** True when MOZCODE had to fall back or could not complete the optimized path. */
   degraded: boolean;
   meta: SavingsMeta;
 }

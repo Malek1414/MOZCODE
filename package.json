@@ -21,18 +21,25 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/server.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "benchmark:tokens": "node --no-warnings --import tsx scripts/benchmark.ts",
+    "benchmark:performance": "node --no-warnings --import tsx scripts/benchmark-performance.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.19.1",
+    "pg": "^8.22.0",
     "tree-sitter-wasms": "^0.1.12",
     "web-tree-sitter": "^0.25.10"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.20.0",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^3.0.0"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11"
   }
 }

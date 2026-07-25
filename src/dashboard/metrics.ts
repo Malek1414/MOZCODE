@@ -17,6 +17,8 @@ export interface MetricAssumptions {
   prefillSecPer1k: number;
   /** Fraction of a search that would otherwise have been a separate round-trip. */
   searchCallFactor: number;
+  /** Exploratory DB turns avoided by one whole-schema call. */
+  dbCallsAvoidedPerSchema: number;
 }
 
 export const DEFAULT_ASSUMPTIONS: MetricAssumptions = {
@@ -25,6 +27,7 @@ export const DEFAULT_ASSUMPTIONS: MetricAssumptions = {
   latencyPerCallS: 3.5,
   prefillSecPer1k: 0.05,
   searchCallFactor: 0.5,
+  dbCallsAvoidedPerSchema: 9,
 };
 
 export interface KpiMetrics {
@@ -47,10 +50,13 @@ export function computeMetrics(
   const tokensSaved = summary.totalSaved;
   const editCalls = summary.byTool.find((t) => t.tool === "code_edit")?.calls ?? 0;
   const searchCalls = summary.byTool.find((t) => t.tool === "code_search")?.calls ?? 0;
+  const dbSchemaCalls = summary.byTool.find((t) => t.tool === "db_schema")?.calls ?? 0;
 
   // Round-trips avoided: each AST-anchored edit avoids a re-read; each search
-  // consolidates what would otherwise have been separate file-opening turns.
-  const callsSaved = Math.round(editCalls + searchCalls * a.searchCallFactor);
+  // consolidates file-opening turns; each schema map replaces iterative discovery.
+  const callsSaved = Math.round(
+    editCalls + searchCalls * a.searchCallFactor + dbSchemaCalls * a.dbCallsAvoidedPerSchema,
+  );
 
   const apiCostSaved = (tokensSaved / 1_000_000) * a.inputPricePerM;
   const costSaved = apiCostSaved + callsSaved * a.costPerAvoidedCall;

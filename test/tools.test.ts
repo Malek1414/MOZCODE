@@ -57,10 +57,19 @@ describe("code_read", () => {
 });
 
 describe("code_search", () => {
-  it("groups matches by enclosing symbol", async () => {
+  it("groups matches by actionable qualified symbol names", async () => {
     const r = await codeSearch(join(here, "fixtures"), "balance");
-    expect(r.text).toContain("Account");
+    expect(r.text).toContain("Account.constructor");
+    expect(r.text).toContain("Account.deposit");
+    expect(r.text).toMatch(/Account\.deposit ⟨method L\d+-\d+; hit L\d+⟩/);
+    expect(r.text).not.toContain("⟨top-level⟩");
     expect(r.meta.baselineTokens).toBeGreaterThan(0);
+  });
+
+  it("uses the match offset to recognize exported declarations", async () => {
+    const r = await codeSearch(join(here, "fixtures"), "function add");
+    expect(r.text).toMatch(/  add ⟨function L\d+-\d+; hit L\d+⟩/);
+    expect(r.text).not.toContain("export function add");
   });
 
   it("reports no matches cleanly", async () => {
@@ -83,6 +92,8 @@ describe("code_edit", () => {
     const content = await fs.readFile(tmp, "utf8");
     expect(content).toContain("return a + b + 0;");
     expect(content).toContain("class Account"); // rest of file intact
+    const reread = await codeRead(tmp, "sample.ts", { symbol: "add", contextLines: 0 });
+    expect(reread.text).toContain("return a + b + 0;");
   });
 
   it("rejects an edit that would break the parse", async () => {

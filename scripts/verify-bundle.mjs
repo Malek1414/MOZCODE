@@ -42,7 +42,8 @@ await fs.rm(tmp, { recursive: true, force: true });
 await fs.rm(home, { recursive: true, force: true });
 
 const ok =
-  names.length === 7 &&
+  names.length === 8 &&
+  names.includes("db_schema") &&
   outline.includes("class Account") &&
   read.includes("function add") &&
   !read.includes("class Account");

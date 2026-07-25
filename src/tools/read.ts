@@ -1,6 +1,5 @@
-import { languageForPath } from "../ast/languages.js";
-import { extractSymbols, resolveSymbol } from "../ast/engine.js";
-import { readFileSafe } from "../util/files.js";
+import { resolveSymbol } from "../ast/engine.js";
+import { analyzeFile } from "../ast/file-cache.js";
 import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 import { renderOutline } from "./outline.js";
@@ -22,13 +21,12 @@ function withContext(source: string, startLine: number, endLine: number, context
 }
 
 export async function codeRead(absPath: string, relPath: string, opts: ReadOptions = {}): Promise<ToolResult> {
-  const source = await readFileSafe(absPath);
+  const { source, language, symbols, hasError } = await analyzeFile(absPath);
   const baseline = estimateTokens(source);
-  const lang = languageForPath(absPath);
   const context = opts.contextLines ?? 3;
 
   // Unsupported language -> plain (numbered) whole-file read.
-  if (!lang) {
+  if (!language) {
     const numbered = source
       .split("\n")
       .map((l, i) => `${String(i + 1).padStart(4)}  ${l}`)
@@ -39,8 +37,6 @@ export async function codeRead(absPath: string, relPath: string, opts: ReadOptio
       meta: makeMeta("code_read", relPath, baseline, estimateTokens(numbered)),
     };
   }
-
-  const { symbols, hasError } = await extractSymbols(source, lang);
 
   // No symbol requested -> collapsed-body outline (the map).
   if (!opts.symbol) {
