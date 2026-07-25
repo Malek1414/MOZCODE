@@ -1,0 +1,11 @@
+{
+  "name": "mozcode",
+  "owner": { "name": "Malek1414" },
+  "plugins": [
+    {
+      "name": "mozcode",
+      "source": "./",
+      "description": "Symbol-level MCP server for Claude Code: returns symbols/outlines instead of whole files to cut input-token use, AST-anchored edits, a local Saira-styled savings dashboard, and Haiku-routed agents. Clean-room OSS."
+    }
+  ]
+}
