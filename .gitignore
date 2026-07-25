@@ -4,3 +4,6 @@ dist/
 .DS_Store
 grammars/*.wasm
 !grammars/.gitkeep
+
+# Local research doc — kept out of the public repo
+wozcode-teardown.md

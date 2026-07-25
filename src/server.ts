@@ -8,7 +8,7 @@ import { codeOutline } from "./tools/outline.js";
 import { codeRead } from "./tools/read.js";
 import { codeSearch } from "./tools/search.js";
 import { codeEdit } from "./tools/edit.js";
-import { record, loadEntries, summarize, terseHome } from "./metering/store.js";
+import { record, loadEntries, summarize, mozcodeHome } from "./metering/store.js";
 import { SUPPORTED_LANGUAGES } from "./ast/languages.js";
 import type { ToolResult } from "./tools/types.js";
 import { generateDashboard, openInBrowser } from "./dashboard/generate.js";
@@ -84,24 +84,24 @@ const TOOLS = [
     },
   },
   {
-    name: "terse_savings",
+    name: "moz_savings",
     description: "Report estimated token savings for this session and all-time.",
     inputSchema: { type: "object", properties: {} },
   },
   {
-    name: "terse_status",
-    description: "Report Terse server status: supported languages and metering store location.",
+    name: "moz_status",
+    description: "Report MOZCODE server status: supported languages and metering store location.",
     inputSchema: { type: "object", properties: {} },
   },
   {
-    name: "terse_dashboard",
+    name: "moz_dashboard",
     description: "Regenerate the local HTML savings dashboard from metering data and open it in the browser.",
     inputSchema: { type: "object", properties: { open: { type: "boolean", description: "Open in the default browser (default true)." } } },
   },
 ];
 
 const server = new Server(
-  { name: "terse", version: "0.1.0" },
+  { name: "mozcode", version: "0.1.0" },
   { capabilities: { tools: {} } },
 );
 
@@ -130,26 +130,26 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const r = await meter(await codeEdit(abs, rel, String(args.symbol), String(args.new_source)));
         return textResult(r.text, r.degraded && r.text.includes("rejected"));
       }
-      case "terse_savings": {
+      case "moz_savings": {
         const all = summarize(await loadEntries());
         const session = summarize((await loadEntries()).filter((e) => e.session === SESSION));
         return textResult(
-          `Terse estimated savings (illustrative, not a billing figure):\n` +
+          `MOZCODE estimated savings (illustrative, not a billing figure):\n` +
             `• This session: ${session.totalSaved.toLocaleString()} tokens saved across ${session.calls} calls (${session.avgReductionPct.toFixed(0)}% avg reduction).\n` +
             `• All-time: ${all.totalSaved.toLocaleString()} tokens saved across ${all.calls} calls, ${all.projects} project(s).\n` +
-            `Run terse_dashboard for the full breakdown.`,
+            `Run moz_dashboard for the full breakdown.`,
         );
       }
-      case "terse_status": {
+      case "moz_status": {
         return textResult(
-          `Terse v0.1.0 — active.\n` +
+          `MOZCODE v0.1.0 — active.\n` +
             `• Supported languages (AST): ${SUPPORTED_LANGUAGES.join(", ")} (others fall back to plain reads).\n` +
             `• Session: ${SESSION}\n` +
             `• Project: ${PROJECT}\n` +
-            `• Metering store: ${terseHome()}/metering/`,
+            `• Metering store: ${mozcodeHome()}/metering/`,
         );
       }
-      case "terse_dashboard": {
+      case "moz_dashboard": {
         const { path: out, totalSaved, calls } = await generateDashboard();
         if (args.open !== false) openInBrowser(out);
         return textResult(`Dashboard written to ${out} (${totalSaved.toLocaleString()} est. tokens saved over ${calls} calls). Opening in your browser.`);
@@ -159,7 +159,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return textResult(`Terse ${name} failed: ${msg}`, true);
+    return textResult(`MOZCODE ${name} failed: ${msg}`, true);
   }
 });
 
@@ -167,11 +167,11 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // eslint-disable-next-line no-console
-  console.error(`[terse] MCP server ready (session ${SESSION.slice(0, 8)})`);
+  console.error(`[mozcode] MCP server ready (session ${SESSION.slice(0, 8)})`);
 }
 
 main().catch((err) => {
   // eslint-disable-next-line no-console
-  console.error("[terse] fatal:", err);
+  console.error("[mozcode] fatal:", err);
   process.exit(1);
 });

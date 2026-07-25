@@ -15,15 +15,15 @@ describe("MCP server integration (stdio)", () => {
   let client: Client;
 
   beforeAll(async () => {
-    project = await fs.mkdtemp(join(tmpdir(), "terse-proj-"));
-    home = await fs.mkdtemp(join(tmpdir(), "terse-home-"));
+    project = await fs.mkdtemp(join(tmpdir(), "mozcode-proj-"));
+    home = await fs.mkdtemp(join(tmpdir(), "mozcode-home-"));
     await fs.copyFile(join(here, "fixtures", "sample.ts"), join(project, "sample.ts"));
 
     const transport = new StdioClientTransport({
       command: "node",
       args: ["--no-warnings", serverPath],
       cwd: project,
-      env: { ...process.env, TERSE_HOME: home } as Record<string, string>,
+      env: { ...process.env, MOZCODE_HOME: home } as Record<string, string>,
     });
     client = new Client({ name: "test", version: "1.0.0" });
     await client.connect(transport);
@@ -39,7 +39,7 @@ describe("MCP server integration (stdio)", () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual(
-      ["code_edit", "code_outline", "code_read", "code_search", "terse_dashboard", "terse_savings", "terse_status"].sort(),
+      ["code_edit", "code_outline", "code_read", "code_search", "moz_dashboard", "moz_savings", "moz_status"].sort(),
     );
   });
 
@@ -72,15 +72,15 @@ describe("MCP server integration (stdio)", () => {
     expect(onDisk).toContain("return a + b + 1;");
   });
 
-  it("terse_savings reports accumulated savings", async () => {
-    const r = await client.callTool({ name: "terse_savings", arguments: {} });
+  it("moz_savings reports accumulated savings", async () => {
+    const r = await client.callTool({ name: "moz_savings", arguments: {} });
     expect(text(r)).toContain("saved");
   });
 
-  it("terse_dashboard writes the HTML file", async () => {
-    const r = await client.callTool({ name: "terse_dashboard", arguments: { open: false } });
+  it("moz_dashboard writes the HTML file", async () => {
+    const r = await client.callTool({ name: "moz_dashboard", arguments: { open: false } });
     expect(text(r)).toContain("Dashboard written");
     const html = await fs.readFile(join(home, "dashboard.html"), "utf8");
-    expect(html).toContain("Terse — savings dashboard");
+    expect(html).toContain("MOZCODE — savings dashboard");
   });
 });

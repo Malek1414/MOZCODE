@@ -8,11 +8,11 @@ import { makeMeta } from "../src/tools/types.js";
 describe("metering store", () => {
   let home: string;
   beforeEach(async () => {
-    home = join(tmpdir(), `terse-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    process.env.TERSE_HOME = home;
+    home = join(tmpdir(), `mozcode-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    process.env.MOZCODE_HOME = home;
   });
   afterEach(async () => {
-    delete process.env.TERSE_HOME;
+    delete process.env.MOZCODE_HOME;
     await fs.rm(home, { recursive: true, force: true });
   });
 

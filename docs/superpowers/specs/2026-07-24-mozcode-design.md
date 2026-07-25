@@ -1,19 +1,19 @@
-# Terse — Symbol-Level MCP Server for Claude Code
+# MOZCODE — Symbol-Level MCP Server for Claude Code
 
 *Design spec · 2026-07-24 · Status: approved, executing*
 
 ## Provenance & legal
 
-Terse is a **clean-room open-source implementation** designed from a public technical
+MOZCODE is a **clean-room open-source implementation** designed from a public technical
 teardown of WOZCODE (a closed-source Claude Code plugin by Woz, YC W25). No WOZCODE
 source code, assets, or branding are used or copied. The teardown itself is built entirely
 from public sources and states plainly that WOZCODE's mechanism is a well-known public
 technique (tree-sitter AST parsing + a local stdio MCP server + model routing) with nothing
-proprietary in the request path. Terse reconstructs that *mechanism* from first principles.
+proprietary in the request path. MOZCODE reconstructs that *mechanism* from first principles.
 Original name, MIT-licensed.
 
 Where the teardown could not observe something (e.g. WOZCODE's exact tool surface, or what
-its remote dashboard actually renders), Terse does **not** claim to replicate it. It builds an
+its remote dashboard actually renders), MOZCODE does **not** claim to replicate it. It builds an
 honest analog and labels estimates as estimates.
 
 ## 1. Goal & non-goals
@@ -30,7 +30,7 @@ token-saving mechanism described in the teardown (§4.2).
 - Graceful fallback to whole-file / line-range reads for unsupported languages or parse errors.
 - Savings metering (estimated counterfactual bytes) persisted to a local JSONL store.
 - Two hooks: SessionStart (CWD inject + tool-preference nudge), PostToolUse (record metering).
-- Skills: `/terse-savings`, `/terse-status`, `/terse-dashboard`.
+- Skills: `/moz-savings`, `/moz-status`, `/moz-dashboard`.
 - Local self-contained HTML savings dashboard driven by real metering data.
 
 **Non-goals (explicitly cut).**
@@ -47,13 +47,13 @@ token-saving mechanism described in the teardown (§4.2).
 Claude Code session
   |
   |- .mcp.json spawns:  node dist/server.js   (stdio, alwaysLoad)
-  |     \- Terse MCP server: 4 tools + metering recorder
+  |     \- MOZCODE MCP server: 4 tools + metering recorder
   |
   |- hooks/
   |     - sessionstart.js  -> inject CWD; nudge model toward code_* tools
   |     - posttooluse.js    -> append per-call savings to metering store
   |
-  \- skills/  /terse-savings  /terse-status  /terse-dashboard  (read metering store)
+  \- skills/  /moz-savings  /moz-status  /moz-dashboard  (read metering store)
 ```
 
 The server is one process built around a **tree-sitter AST engine** using `web-tree-sitter`
@@ -86,15 +86,15 @@ Language set is the only per-language work; the rest of the pipeline is language
 ## 5. Savings metering (honest counterfactual)
 
 The teardown flags (open q#4) that savings are measured against an *unobservable* baseline.
-Terse does not fake precision:
+MOZCODE does not fake precision:
 
 - On each `code_read` / `code_outline` / `code_search`, the server holds both what it
   **returned** and what a naive `Read`/grep of the same target **would have** returned.
 - It records `baseline_tokens - actual_tokens` per call. Tokens are estimated as
   `ceil(chars / 4)` and **labelled as an estimate**, not a billing figure.
-- Records append to per-project JSONL at `~/.terse/metering/<project-hash>.jsonl`, each line:
+- Records append to per-project JSONL at `~/.mozcode/metering/<project-hash>.jsonl`, each line:
   `{ ts, tool, path, project, baseline_tokens, actual_tokens, saved_tokens }`.
-- `/terse-savings` and the dashboard aggregate these with an explicit "estimated, illustrative"
+- `/moz-savings` and the dashboard aggregate these with an explicit "estimated, illustrative"
   disclaimer.
 
 ## 6. Hooks
@@ -104,18 +104,18 @@ teardown notes carries a low community trust score (§4.4).
 
 - **SessionStart:** inject working directory; add a short system-prompt nudge to prefer
   `code_*` tools over `Read`/`Grep` for source files.
-- **PostToolUse:** record metering for Terse tools only. No interception of other tools.
+- **PostToolUse:** record metering for MOZCODE tools only. No interception of other tools.
 
 ## 7. Skills
 
-- `/terse-savings` — session + all-time estimated savings (text).
-- `/terse-status` — server health, loaded grammars, supported languages, store location.
-- `/terse-dashboard` — regenerate and open the local HTML dashboard.
+- `/moz-savings` — session + all-time estimated savings (text).
+- `/moz-status` — server health, loaded grammars, supported languages, store location.
+- `/moz-dashboard` — regenerate and open the local HTML dashboard.
 
 ## 8. Local savings dashboard
 
-A `/terse-dashboard` skill reads `~/.terse/metering/*.jsonl` and renders a **single
-self-contained HTML file** (inline CSS/JS, data embedded as JSON) to `~/.terse/dashboard.html`,
+A `/moz-dashboard` skill reads `~/.mozcode/metering/*.jsonl` and renders a **single
+self-contained HTML file** (inline CSS/JS, data embedded as JSON) to `~/.mozcode/dashboard.html`,
 then opens it. No running server, no account — consistent with the zero-server ethos.
 
 Screens, all from real metering data, every total labelled *estimated*:
@@ -127,7 +127,7 @@ Screens, all from real metering data, every total labelled *estimated*:
 - **Session log** — per-session table: calls, baseline vs actual tokens, delta.
 
 Theme-aware (light/dark), accessible palette, no external assets (works offline). Framed as
-Terse's own dashboard — an analog of WOZCODE's savings view, not a claimed replica.
+MOZCODE's own dashboard — an analog of WOZCODE's savings view, not a claimed replica.
 
 ## 9. Error handling
 
@@ -146,10 +146,10 @@ mirroring the built-in's message. No recoverable condition throws.
 ## 11. Repo layout
 
 ```
-terse/
+mozcode/
   .mcp.json
   hooks/            sessionstart.js, posttooluse.js
-  skills/           terse-savings/, terse-status/, terse-dashboard/
+  skills/           mozcode-savings/, mozcode-status/, mozcode-dashboard/
   src/
     server.ts       MCP wiring (@modelcontextprotocol/sdk)
     ast/engine.ts   parser mgmt + queries + symbol resolution
@@ -168,7 +168,7 @@ terse/
 3. `code_search`
 4. `code_edit`
 5. Python grammar
-6. Metering + `/terse-savings`
-7. Hooks + `/terse-status`
-8. Dashboard + `/terse-dashboard`
+6. Metering + `/moz-savings`
+7. Hooks + `/moz-status`
+8. Dashboard + `/moz-dashboard`
 9. Integration smoke + README

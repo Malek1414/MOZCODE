@@ -1,6 +1,6 @@
-# Terse
+# MOZCODE
 
-**A symbol-level MCP server for Claude Code.** Terse returns the *symbol you asked
+**A symbol-level MCP server for Claude Code.** MOZCODE returns the *symbol you asked
 for* instead of the whole file, so an agentic coding loop spends far fewer input
 tokens. It parses source with tree-sitter, hands the model a function/class/method
 (or a collapsed outline) rather than 400 lines of context, anchors edits to AST
@@ -10,7 +10,7 @@ savings to a local dashboard.
 Everything runs **locally**. There is no account, no proxy, and no server that
 receives your code — the MCP server is a local stdio process.
 
-> **Provenance.** Terse is a clean-room, open-source implementation designed from a
+> **Provenance.** MOZCODE is a clean-room, open-source implementation designed from a
 > public technical teardown of [WOZCODE](https://wozcode.com) (Woz, YC W25). No
 > WOZCODE source, assets, or branding are used. It reconstructs a well-known public
 > technique — tree-sitter AST extraction + a local MCP server — from first
@@ -21,7 +21,7 @@ receives your code — the MCP server is a local stdio process.
 In an agentic loop, the accumulated conversation is re-sent on every turn, so a
 file read into context at turn 3 is paid for again at turns 4, 5, 6… until
 compaction. Returning *less text per tool call* therefore compounds across the
-session. Terse attacks bytes-per-tool-call:
+session. MOZCODE attacks bytes-per-tool-call:
 
 - **`code_read(path, symbol)`** → just that function/class + a few context lines.
   No symbol → a collapsed-body outline of the file.
@@ -40,7 +40,7 @@ Anything else falls back to a plain read.
 ## Install (local, no account)
 
 ```bash
-git clone <this-repo> terse && cd terse
+git clone <this-repo> mozcode && cd mozcode
 npm install
 npm run build
 ```
@@ -53,27 +53,27 @@ node --no-warnings dist/server.js   # speaks MCP over stdio
 ```
 
 The plugin manifest (`.mcp.json` / `.claude-plugin/plugin.json`) registers the
-`terse` MCP server (`alwaysLoad`), a **SessionStart hook** that nudges the model to
+`mozcode` MCP server (`alwaysLoad`), a **SessionStart hook** that nudges the model to
 prefer the `code_*` tools for source files, and three commands.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `/terse-savings` | Estimated tokens saved this session and all-time. |
-| `/terse-status` | Server status: supported languages, metering store location. |
-| `/terse-dashboard` | Regenerate and open the local HTML savings dashboard. |
+| `/moz-savings` | Estimated tokens saved this session and all-time. |
+| `/moz-status` | Server status: supported languages, metering store location. |
+| `/moz-dashboard` | Regenerate and open the local HTML savings dashboard. |
 
 ## The savings dashboard
 
-`/terse-dashboard` reads the metering log and writes a single self-contained,
-theme-aware HTML file to `~/.terse/dashboard.html` (no server, works offline):
+`/moz-dashboard` reads the metering log and writes a single self-contained,
+theme-aware HTML file to `~/.mozcode/dashboard.html` (no server, works offline):
 headline stat tiles, cumulative savings over time, savings by tool, top files by
 reduction, and a per-session log.
 
 ### On the honesty of the numbers
 
-Savings are an **estimate against a counterfactual**. Terse knows what it returned
+Savings are an **estimate against a counterfactual**. MOZCODE knows what it returned
 and what a naive whole-file `Read` / plain `grep` of the same target *would have*
 returned, and records the difference. Tokens are estimated at ~4 chars/token. This
 illustrates the mechanism; it is **not a billing figure**, and the baseline (what
@@ -85,9 +85,9 @@ on its face.
 ```
 Claude Code session
   ├─ .mcp.json spawns  node dist/server.js   (stdio, alwaysLoad)
-  │     └─ 4 code tools + 3 terse_* tools; records metering in-process
+  │     └─ 4 code tools + 3 moz_* tools; records metering in-process
   ├─ hooks/session-start.mjs   → CWD + "prefer code_* tools" nudge
-  └─ commands/                 → /terse-savings /terse-status /terse-dashboard
+  └─ commands/                 → /moz-savings /moz-status /moz-dashboard
 ```
 
 - `src/ast/` — tree-sitter loader + a controlled tree walk that captures top-level
@@ -96,7 +96,7 @@ Claude Code session
 - `src/metering/` — append-only JSONL store + aggregation.
 - `src/dashboard/` — pure `Summary → HTML` renderer (validated data-viz palette).
 
-**Design note:** the teardown described a PostToolUse hook for metering; Terse
+**Design note:** the teardown described a PostToolUse hook for metering; MOZCODE
 records in-process instead, because a shell hook only sees tool *text*, not the
 structured baseline/actual counts. This is more reliable and keeps the hook surface
 to a single SessionStart nudge (rather than intercepting every tool call).
@@ -109,7 +109,7 @@ npm run build     # tsc + bundle grammars into grammars/
 npm run dev       # run the server from source (tsx)
 ```
 
-Design spec: [`docs/superpowers/specs/2026-07-24-terse-design.md`](docs/superpowers/specs/2026-07-24-terse-design.md).
+Design spec: [`docs/superpowers/specs/2026-07-24-mozcode-design.md`](docs/superpowers/specs/2026-07-24-mozcode-design.md).
 
 ## License
 

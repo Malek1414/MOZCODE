@@ -15,13 +15,13 @@ export interface MeteringEntry {
   savedTokens: number;
 }
 
-/** Root for all Terse state. Overridable via TERSE_HOME (used by tests). */
-export function terseHome(): string {
-  return process.env.TERSE_HOME || path.join(os.homedir(), ".terse");
+/** Root for all MOZCODE state. Overridable via MOZCODE_HOME (used by tests). */
+export function mozcodeHome(): string {
+  return process.env.MOZCODE_HOME || path.join(os.homedir(), ".mozcode");
 }
 
 function meteringDir(): string {
-  return path.join(terseHome(), "metering");
+  return path.join(mozcodeHome(), "metering");
 }
 
 function projectFile(project: string): string {

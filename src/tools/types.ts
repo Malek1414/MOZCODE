@@ -3,7 +3,7 @@ export interface SavingsMeta {
   path?: string;
   /** Tokens a naive built-in (Read/Grep) would have returned. */
   baselineTokens: number;
-  /** Tokens Terse actually returned. */
+  /** Tokens MOZCODE actually returned. */
   actualTokens: number;
   /** baselineTokens - actualTokens (never negative). */
   savedTokens: number;
@@ -12,7 +12,7 @@ export interface SavingsMeta {
 export interface ToolResult {
   /** The payload shown to the model. */
   text: string;
-  /** True when Terse fell back to a plain read instead of symbol extraction. */
+  /** True when MOZCODE fell back to a plain read instead of symbol extraction. */
   degraded: boolean;
   meta: SavingsMeta;
 }

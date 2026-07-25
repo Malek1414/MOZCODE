@@ -22,7 +22,7 @@ describe("code_outline", () => {
   });
 
   it("degrades gracefully on an unsupported language", async () => {
-    const p = join(tmpdir(), `terse-${Date.now()}.md`);
+    const p = join(tmpdir(), `mozcode-${Date.now()}.md`);
     await fs.writeFile(p, "# hello\n\nsome text\n");
     const r = await codeOutline(p, "note.md");
     expect(r.degraded).toBe(true);
@@ -72,7 +72,7 @@ describe("code_search", () => {
 describe("code_edit", () => {
   let tmp: string;
   beforeEach(async () => {
-    tmp = join(tmpdir(), `terse-edit-${Date.now()}-${Math.random().toString(36).slice(2)}.ts`);
+    tmp = join(tmpdir(), `mozcode-edit-${Date.now()}-${Math.random().toString(36).slice(2)}.ts`);
     await fs.copyFile(fixture("sample.ts"), tmp);
   });
 
