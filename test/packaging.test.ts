@@ -9,6 +9,7 @@ import {
   statusLineCommand,
 } from "../hooks/statusline-install.mjs";
 import { GRAMMAR_FILE, SUPPORTED_LANGUAGES } from "../src/ast/languages.js";
+import { VERSION } from "../src/version.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -41,6 +42,36 @@ describe("shipped assets", () => {
     expect(pkg.files).toContain("dist");
     expect(pkg.files).toContain("grammars");
     expect(pkg.files).toContain("hooks");
+  });
+});
+
+/**
+ * Claude Code copies a plugin into a versioned cache directory and re-copies it
+ * only when the manifest version changes. Shipping changed content under an
+ * unchanged version means every installed user silently keeps the old build —
+ * so the version is a release mechanism, not just a label, and the four places
+ * that carry it must never drift apart.
+ */
+describe("version consistency", () => {
+  const read = async (p: string) => JSON.parse(await fs.readFile(join(root, p), "utf8"));
+
+  it("agrees across package.json, both plugin manifests, and src/version.ts", async () => {
+    const [pkg, claudePlugin, codexPlugin] = await Promise.all([
+      read("package.json"),
+      read(".claude-plugin/plugin.json"),
+      read(".codex-plugin/plugin.json"),
+    ]);
+    expect(pkg.version).toBe(VERSION);
+    expect(claudePlugin.version).toBe(VERSION);
+    expect(codexPlugin.version).toBe(VERSION);
+  });
+
+  it("carries the current version into the built bundle", async () => {
+    // esbuild keeps `MOZCODE v${VERSION}` as a template and emits the constant
+    // separately, so assert on the emitted constant rather than the rendered
+    // string — this catches a stale dist/ that was never rebuilt after a bump.
+    const bundle = await fs.readFile(join(root, "dist", "server.js"), "utf8");
+    expect(bundle).toContain(`VERSION = "${VERSION}"`);
   });
 });
 

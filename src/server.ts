@@ -11,6 +11,7 @@ import { codeEdit } from "./tools/edit.js";
 import { dbSchema } from "./db/schema.js";
 import { record, loadEntries, summarize, mozcodeHome, writeCurrentSession } from "./metering/store.js";
 import { SUPPORTED_LANGUAGES } from "./ast/languages.js";
+import { VERSION } from "./version.js";
 import type { ToolResult } from "./tools/types.js";
 import { generateDashboard, openInBrowser } from "./dashboard/generate.js";
 
@@ -128,7 +129,7 @@ const TOOLS = [
 ];
 
 const server = new Server(
-  { name: "mozcode", version: "0.1.0" },
+  { name: "mozcode", version: VERSION },
   { capabilities: { tools: {} } },
 );
 
@@ -178,7 +179,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "moz_status": {
         return textResult(
-          `MOZCODE v0.1.0 — active.\n` +
+          `MOZCODE v${VERSION} — active.\n` +
             `• Supported languages (AST): ${SUPPORTED_LANGUAGES.join(", ")} (others fall back to plain reads).\n` +
             `• Database schema introspection: SQLite + PostgreSQL metadata (db_schema).\n` +
             `• Session: ${SESSION}\n` +

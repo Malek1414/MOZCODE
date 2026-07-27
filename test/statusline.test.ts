@@ -94,8 +94,12 @@ describe("statusline", () => {
     // for a further 500ms after the line was already on stdout, so Claude Code —
     // which reads the statusline until the process exits — rendered a stale line.
     // The process must not linger meaningfully past its own output.
+    // The delta is the regression guard: it was ~490ms before the fix and is a
+    // few ms after, and unlike total runtime it does not move with machine load
+    // or node startup time.
     expect(run.exitMs - run.firstByteMs).toBeLessThan(150);
-    expect(run.exitMs).toBeLessThan(400);
+    // Generous upper bound purely as a "never hangs" smoke check.
+    expect(run.exitMs).toBeLessThan(3000);
   });
 
   it("reflects entries appended after a previous run (no stale cache)", async () => {
