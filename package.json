@@ -1,6 +1,6 @@
 {
   "name": "mozcode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Symbol-level MCP server for Claude Code — returns symbols and outlines instead of whole files, cutting input-token consumption. Clean-room OSS.",
   "license": "MIT",
   "type": "module",

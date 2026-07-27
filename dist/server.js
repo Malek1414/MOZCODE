@@ -26959,6 +26959,9 @@ function summarize(entries, topFiles2 = 15) {
   };
 }
 
+// src/version.ts
+var VERSION = "0.2.0";
+
 // src/dashboard/generate.ts
 import { promises as fs8 } from "node:fs";
 import * as path6 from "node:path";
@@ -27446,7 +27449,7 @@ var TOOLS = [
   }
 ];
 var server = new Server(
-  { name: "mozcode", version: "0.1.0" },
+  { name: "mozcode", version: VERSION },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -27494,7 +27497,7 @@ Run moz_dashboard for the full breakdown.`
       }
       case "moz_status": {
         return textResult(
-          `MOZCODE v0.1.0 \u2014 active.
+          `MOZCODE v${VERSION} \u2014 active.
 \u2022 Supported languages (AST): ${SUPPORTED_LANGUAGES.join(", ")} (others fall back to plain reads).
 \u2022 Database schema introspection: SQLite + PostgreSQL metadata (db_schema).
 \u2022 Session: ${SESSION}
