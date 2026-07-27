@@ -51,6 +51,11 @@ npm install
 npm run build
 ```
 
+Installing as a plugin needs **no build step and no `node_modules`**: the bundled
+server, the status line, and the tree-sitter grammar `.wasm` files are all
+committed, and the grammar loader resolves them relative to the bundle. Cloning
+and building is only needed to develop MOZCODE itself.
+
 Then add it to Claude Code or Codex as a plugin (point your local plugin marketplace
 at this directory), or run the server directly for testing:
 
@@ -64,6 +69,31 @@ server. The OpenAI plugin also bundles a `mozcode` skill that teaches supported
 models when to prefer the symbol-level tools. A **SessionStart hook** nudges the
 model to use `code_*` for source files, and the three dashboard/status commands
 remain available.
+
+## The status line
+
+MOZCODE shows live savings on the line beneath your prompt:
+
+```
+⚡ MOZCODE est. session: $0.0086 · 1.5k tokens · 4s · 1 roundtrips  │  all-time: $3.17 · 1.1M tokens · 1m 10s · 5 roundtrips
+```
+
+Claude Code's `statusLine` is a **settings** field, not a plugin-manifest field —
+a plugin cannot declare one. So the SessionStart hook registers MOZCODE's status
+line in `~/.claude/settings.json` for you, and tells you in-session the one time
+it does so. It refreshes every 5 seconds on top of Claude Code's event-driven
+updates, so the figures move as tools run rather than only at turn boundaries.
+
+The install is deliberately conservative:
+
+- **It never clobbers an existing status line.** If one from another tool is
+  already configured, MOZCODE leaves it untouched and says so.
+- **It repoints its own entry after an upgrade**, since plugins install into a
+  versioned directory and a stale absolute path would run the old build.
+- **It refuses to write a `settings.json` it cannot parse**, so a malformed or
+  mid-edit config is never corrupted.
+- **Opt out** with `MOZCODE_NO_STATUSLINE=1`, or just edit the `statusLine`
+  entry — MOZCODE will not fight you for it.
 
 ## Commands
 
