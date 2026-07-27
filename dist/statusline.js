@@ -146,10 +146,16 @@ function readStdin() {
     let data = "";
     if (process.stdin.isTTY) return resolve("");
     process.stdin.setEncoding("utf8");
+    let timer;
+    const done = (value) => {
+      if (timer) clearTimeout(timer);
+      resolve(value);
+    };
+    timer = setTimeout(() => done(data), 500);
+    timer.unref?.();
     process.stdin.on("data", (c) => data += c);
-    process.stdin.on("end", () => resolve(data));
-    process.stdin.on("error", () => resolve(data));
-    setTimeout(() => resolve(data), 500);
+    process.stdin.on("end", () => done(data));
+    process.stdin.on("error", () => done(data));
   });
 }
 var BLUE = "\x1B[38;2;91;145;255m";

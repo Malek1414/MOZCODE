@@ -15,11 +15,22 @@ function readStdin(): Promise<string> {
     let data = "";
     if (process.stdin.isTTY) return resolve("");
     process.stdin.setEncoding("utf8");
+
+    // Safety: never hang the statusline waiting on stdin. The timer is unref'd
+    // and cleared on settle so it can never keep the event loop alive after the
+    // line has been written — Claude Code reads this process until it EXITS, so
+    // a lingering timer renders the statusline stale by the timer's full delay.
+    let timer: NodeJS.Timeout | undefined;
+    const done = (value: string) => {
+      if (timer) clearTimeout(timer);
+      resolve(value);
+    };
+    timer = setTimeout(() => done(data), 500);
+    timer.unref?.();
+
     process.stdin.on("data", (c) => (data += c));
-    process.stdin.on("end", () => resolve(data));
-    process.stdin.on("error", () => resolve(data));
-    // Safety: never hang the statusline waiting on stdin.
-    setTimeout(() => resolve(data), 500);
+    process.stdin.on("end", () => done(data));
+    process.stdin.on("error", () => done(data));
   });
 }
 
