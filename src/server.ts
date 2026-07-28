@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -16,11 +17,51 @@ import type { ToolResult } from "./tools/types.js";
 import { generateDashboard, openInBrowser } from "./dashboard/generate.js";
 
 const SESSION = crypto.randomUUID();
-const PROJECT = process.cwd();
+
+/**
+ * Where MOZCODE thinks "your project" is. Everything downstream depends on it:
+ * relative tool paths resolve against it, code_search and db_schema use it as
+ * their root, and metering is filed under it.
+ *
+ * Claude launches plugin MCP servers in the user's workspace. Codex resolves a
+ * plugin-relative MCP cwd against the installed plugin root instead. That makes
+ * the bundle discoverable, but it leaves no workspace path in the MCP
+ * initialize request or roots list. Refuse project-relative work in that state
+ * rather than silently reading and editing MOZCODE's own installed source.
+ *
+ * scripts/install-codex.mjs registers the same bundle by absolute path without
+ * forcing cwd, so Codex starts it in the user's workspace. MOZCODE_PROJECT is
+ * also available as an explicit host override.
+ */
+const PLUGIN_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+function resolveProject(): { project: string; unresolved: boolean } {
+  const override = process.env.MOZCODE_PROJECT;
+  if (override) return { project: path.resolve(override), unresolved: false };
+
+  const cwd = process.cwd();
+  const hostConfirmedCwd = process.env.MOZCODE_TRUST_CWD === "1";
+  return {
+    project: cwd,
+    unresolved: !hostConfirmedCwd && path.resolve(cwd) === path.resolve(PLUGIN_ROOT),
+  };
+}
+
+const { project: PROJECT, unresolved: PROJECT_UNRESOLVED } = resolveProject();
+
+const UNRESOLVED_MESSAGE =
+  `MOZCODE could not determine which project to work on: it was launched inside its own ` +
+  `plugin directory (${PLUGIN_ROOT}), so every relative path would resolve against MOZCODE's ` +
+  `installed source instead of your code.\n\n` +
+  `Register the bundle with Codex using an absolute path:\n` +
+  `  node "${PLUGIN_ROOT}/scripts/install-codex.mjs"\n\n` +
+  `Then restart Codex. Alternatively, set MOZCODE_PROJECT to the absolute project path.`;
 
 function resolvePaths(p: string): { abs: string; rel: string } {
   const abs = path.isAbsolute(p) ? p : path.resolve(PROJECT, p);
-  const rel = path.relative(PROJECT, abs) || path.basename(abs);
+  const rel = PROJECT_UNRESOLVED
+    ? path.basename(abs)
+    : path.relative(PROJECT, abs) || path.basename(abs);
   return { abs, rel };
 }
 
@@ -38,6 +79,12 @@ const TOOLS = [
     name: "code_read",
     description:
       "Read source code by SYMBOL instead of whole file — returns just the requested function/class/method (with a few context lines), or a collapsed outline when no symbol is given. Prefer this over the built-in Read for code files: it returns far fewer tokens. Falls back to a plain read for unsupported languages.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -52,6 +99,12 @@ const TOOLS = [
     name: "code_outline",
     description:
       "Return the structural skeleton of a file — every top-level and member symbol with its signature and line span, bodies omitted. The map you read before drilling into a symbol with code_read.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: { path: { type: "string", description: "File path (absolute or relative to the project root)." } },
@@ -62,6 +115,12 @@ const TOOLS = [
     name: "code_search",
     description:
       "Search the codebase and return matches GROUPED BY their enclosing qualified symbol and locations, not raw lines. Prefer this over the built-in Grep for code: it collapses many line hits into the handful of functions/classes that contain them.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -75,6 +134,12 @@ const TOOLS = [
     name: "code_edit",
     description:
       "Replace a whole symbol (function/class/method) in place, anchored to its AST span — no line numbers, no re-read afterward. Validates the file still parses before writing. Use for whole-symbol rewrites; use the built-in Edit for small in-line tweaks.",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -89,6 +154,12 @@ const TOOLS = [
     name: "db_schema",
     description:
       "Introspect an entire SQLite or PostgreSQL schema in one compact call instead of discovering it through sequential queries. Returns tables/views, columns, primary/foreign keys, and indexes only — never application rows. For SQLite pass path. For PostgreSQL set DATABASE_URL (or another environment variable) and pass connection_env; never put credentials in tool arguments.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -114,16 +185,34 @@ const TOOLS = [
   {
     name: "moz_savings",
     description: "Report estimated token savings for this session and all-time.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "moz_status",
     description: "Report MOZCODE server status: supported languages and metering store location.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "moz_dashboard",
     description: "Regenerate the local HTML savings dashboard from metering data and open it in the browser.",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: { type: "object", properties: { open: { type: "boolean", description: "Open in the default browser (default true)." } } },
   },
 ];
@@ -137,6 +226,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
+
+  // Keep moz_status available so the problem is diagnosable. Absolute paths do
+  // not depend on PROJECT and remain safe to use.
+  if (PROJECT_UNRESOLVED && name !== "moz_status") {
+    const suppliedPath = args.path;
+    const needsProject = typeof suppliedPath !== "string" || !path.isAbsolute(suppliedPath);
+    if (needsProject) return textResult(UNRESOLVED_MESSAGE, true);
+  }
+
   try {
     switch (name) {
       case "code_read": {
@@ -183,7 +281,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
             `• Supported languages (AST): ${SUPPORTED_LANGUAGES.join(", ")} (others fall back to plain reads).\n` +
             `• Database schema introspection: SQLite + PostgreSQL metadata (db_schema).\n` +
             `• Session: ${SESSION}\n` +
-            `• Project: ${PROJECT}\n` +
+            (PROJECT_UNRESOLVED
+              ? `• Project: UNRESOLVED — project-relative tools are disabled.\n\n${UNRESOLVED_MESSAGE}\n`
+              : `• Project: ${PROJECT}\n`) +
             `• Metering store: ${mozcodeHome()}/metering/`,
         );
       }

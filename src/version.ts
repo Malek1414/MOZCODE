@@ -7,4 +7,4 @@
  * versioned cache by comparing this version, so shipping changed content under an
  * unchanged version means installed users silently keep running the old build.
  */
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";

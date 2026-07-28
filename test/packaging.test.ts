@@ -75,6 +75,32 @@ describe("version consistency", () => {
   });
 });
 
+describe("client-specific MCP launch configuration", () => {
+  const read = async (p: string) => JSON.parse(await fs.readFile(join(root, p), "utf8"));
+
+  it("launches the Codex server relative to the installed plugin root", async () => {
+    const config = await read(".mcp.json");
+    const server = config.mcpServers.mozcode;
+
+    expect(server.command).toBe("node");
+    expect(server.args).toEqual(["--no-warnings", "./dist/server.js"]);
+    expect(server.cwd).toBe(".");
+    expect(server.args.join(" ")).not.toContain("CLAUDE_PLUGIN_ROOT");
+  });
+
+  it("keeps Claude's working plugin-root launch declaration unchanged", async () => {
+    const manifest = await read(".claude-plugin/plugin.json");
+    const server = manifest.mcpServers.mozcode;
+
+    expect(server.command).toBe("node");
+    expect(server.args).toEqual([
+      "--no-warnings",
+      "${CLAUDE_PLUGIN_ROOT}/dist/server.js",
+    ]);
+    expect(server.alwaysLoad).toBe(true);
+  });
+});
+
 describe("statusline self-install", () => {
   const pluginRoot = "/plugins/mozcode/1.2.3";
   const ourCommand = statusLineCommand(pluginRoot);

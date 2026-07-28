@@ -1,6 +1,6 @@
 {
   "name": "mozcode",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local symbol-level code intelligence that gives OpenAI models precise AST context instead of whole files.",
   "author": {
     "name": "Malek1414",

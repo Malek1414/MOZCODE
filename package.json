@@ -1,6 +1,6 @@
 {
   "name": "mozcode",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Symbol-level MCP server for Claude Code — returns symbols and outlines instead of whole files, cutting input-token consumption. Clean-room OSS.",
   "license": "MIT",
   "type": "module",
@@ -16,10 +16,12 @@
     "skills",
     ".codex-plugin",
     ".claude-plugin",
-    ".mcp.json"
+    ".mcp.json",
+    "scripts/install-codex.mjs"
   ],
   "scripts": {
     "build": "node scripts/bundle.mjs",
+    "install:codex": "node scripts/install-codex.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/server.ts",
     "test": "vitest run",

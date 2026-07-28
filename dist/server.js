@@ -12055,6 +12055,7 @@ var require_lib2 = __commonJS({
 // src/server.ts
 import * as path7 from "node:path";
 import * as crypto2 from "node:crypto";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // node_modules/zod/v4/core/core.js
 var _a;
@@ -26960,7 +26961,7 @@ function summarize(entries, topFiles2 = 15) {
 }
 
 // src/version.ts
-var VERSION = "0.2.0";
+var VERSION = "0.3.0";
 
 // src/dashboard/generate.ts
 import { promises as fs8 } from "node:fs";
@@ -27346,10 +27347,27 @@ function openInBrowser(target) {
 
 // src/server.ts
 var SESSION = crypto2.randomUUID();
-var PROJECT = process.cwd();
+var PLUGIN_ROOT = path7.dirname(path7.dirname(fileURLToPath2(import.meta.url)));
+function resolveProject() {
+  const override = process.env.MOZCODE_PROJECT;
+  if (override) return { project: path7.resolve(override), unresolved: false };
+  const cwd = process.cwd();
+  const hostConfirmedCwd = process.env.MOZCODE_TRUST_CWD === "1";
+  return {
+    project: cwd,
+    unresolved: !hostConfirmedCwd && path7.resolve(cwd) === path7.resolve(PLUGIN_ROOT)
+  };
+}
+var { project: PROJECT, unresolved: PROJECT_UNRESOLVED } = resolveProject();
+var UNRESOLVED_MESSAGE = `MOZCODE could not determine which project to work on: it was launched inside its own plugin directory (${PLUGIN_ROOT}), so every relative path would resolve against MOZCODE's installed source instead of your code.
+
+Register the bundle with Codex using an absolute path:
+  node "${PLUGIN_ROOT}/scripts/install-codex.mjs"
+
+Then restart Codex. Alternatively, set MOZCODE_PROJECT to the absolute project path.`;
 function resolvePaths(p) {
   const abs = path7.isAbsolute(p) ? p : path7.resolve(PROJECT, p);
-  const rel = path7.relative(PROJECT, abs) || path7.basename(abs);
+  const rel = PROJECT_UNRESOLVED ? path7.basename(abs) : path7.relative(PROJECT, abs) || path7.basename(abs);
   return { abs, rel };
 }
 async function meter(result) {
@@ -27363,6 +27381,12 @@ var TOOLS = [
   {
     name: "code_read",
     description: "Read source code by SYMBOL instead of whole file \u2014 returns just the requested function/class/method (with a few context lines), or a collapsed outline when no symbol is given. Prefer this over the built-in Read for code files: it returns far fewer tokens. Falls back to a plain read for unsupported languages.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -27376,6 +27400,12 @@ var TOOLS = [
   {
     name: "code_outline",
     description: "Return the structural skeleton of a file \u2014 every top-level and member symbol with its signature and line span, bodies omitted. The map you read before drilling into a symbol with code_read.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: { path: { type: "string", description: "File path (absolute or relative to the project root)." } },
@@ -27385,6 +27415,12 @@ var TOOLS = [
   {
     name: "code_search",
     description: "Search the codebase and return matches GROUPED BY their enclosing qualified symbol and locations, not raw lines. Prefer this over the built-in Grep for code: it collapses many line hits into the handful of functions/classes that contain them.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -27397,6 +27433,12 @@ var TOOLS = [
   {
     name: "code_edit",
     description: "Replace a whole symbol (function/class/method) in place, anchored to its AST span \u2014 no line numbers, no re-read afterward. Validates the file still parses before writing. Use for whole-symbol rewrites; use the built-in Edit for small in-line tweaks.",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -27410,6 +27452,12 @@ var TOOLS = [
   {
     name: "db_schema",
     description: "Introspect an entire SQLite or PostgreSQL schema in one compact call instead of discovering it through sequential queries. Returns tables/views, columns, primary/foreign keys, and indexes only \u2014 never application rows. For SQLite pass path. For PostgreSQL set DATABASE_URL (or another environment variable) and pass connection_env; never put credentials in tool arguments.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -27435,16 +27483,34 @@ var TOOLS = [
   {
     name: "moz_savings",
     description: "Report estimated token savings for this session and all-time.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "moz_status",
     description: "Report MOZCODE server status: supported languages and metering store location.",
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: { type: "object", properties: {} }
   },
   {
     name: "moz_dashboard",
     description: "Regenerate the local HTML savings dashboard from metering data and open it in the browser.",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: { type: "object", properties: { open: { type: "boolean", description: "Open in the default browser (default true)." } } }
   }
 ];
@@ -27455,6 +27521,11 @@ var server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name: name2, arguments: args2 = {} } = req.params;
+  if (PROJECT_UNRESOLVED && name2 !== "moz_status") {
+    const suppliedPath = args2.path;
+    const needsProject = typeof suppliedPath !== "string" || !path7.isAbsolute(suppliedPath);
+    if (needsProject) return textResult(UNRESOLVED_MESSAGE, true);
+  }
   try {
     switch (name2) {
       case "code_read": {
@@ -27501,8 +27572,11 @@ Run moz_dashboard for the full breakdown.`
 \u2022 Supported languages (AST): ${SUPPORTED_LANGUAGES.join(", ")} (others fall back to plain reads).
 \u2022 Database schema introspection: SQLite + PostgreSQL metadata (db_schema).
 \u2022 Session: ${SESSION}
-\u2022 Project: ${PROJECT}
-\u2022 Metering store: ${mozcodeHome()}/metering/`
+` + (PROJECT_UNRESOLVED ? `\u2022 Project: UNRESOLVED \u2014 project-relative tools are disabled.
+
+${UNRESOLVED_MESSAGE}
+` : `\u2022 Project: ${PROJECT}
+`) + `\u2022 Metering store: ${mozcodeHome()}/metering/`
         );
       }
       case "moz_dashboard": {

@@ -47,6 +47,33 @@ describe("MCP server integration (stdio)", () => {
     );
   });
 
+  it("advertises approval-safe annotations for Codex and other MCP clients", async () => {
+    const { tools } = await client.listTools();
+    const byName = new Map(tools.map((tool) => [tool.name, tool]));
+
+    for (const name of ["code_read", "code_outline", "code_search", "moz_savings", "moz_status"]) {
+      expect(byName.get(name)?.annotations).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
+    }
+
+    expect(byName.get("code_edit")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(byName.get("db_schema")?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
+  });
+
   const text = (r: any) => r.content.map((c: any) => c.text).join("\n");
 
   it("code_outline returns a symbol skeleton", async () => {

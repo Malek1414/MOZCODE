@@ -2,7 +2,8 @@
   "mcpServers": {
     "mozcode": {
       "command": "node",
-      "args": ["--no-warnings", "${CLAUDE_PLUGIN_ROOT}/dist/server.js"],
+      "args": ["--no-warnings", "./dist/server.js"],
+      "cwd": ".",
       "alwaysLoad": true
     }
   }

@@ -63,12 +63,31 @@ at this directory), or run the server directly for testing:
 node --no-warnings dist/server.js   # speaks MCP over stdio
 ```
 
+For Codex, run the one-time absolute-path registration after installing or
+updating the plugin:
+
+```bash
+npm run install:codex
+```
+
+Codex does not expand Claude's plugin-root placeholder. Its plugin-relative
+fallback can start the server, but it starts inside the installed plugin rather
+than the active workspace. The installer registers the same bundle by absolute
+path without forcing `cwd`, so every future Codex session launches MOZCODE in
+the project where Codex was started. It also marks that `cwd` as host-confirmed,
+which keeps MOZCODE usable when the active project is the MOZCODE repository
+itself. Restart an already-open Codex session after running it.
+
 The Claude manifest (`.claude-plugin/plugin.json`) and universal OpenAI/Codex
 manifest (`.codex-plugin/plugin.json`) register the same local `mozcode` MCP
-server. The OpenAI plugin also bundles a `mozcode` skill that teaches supported
-models when to prefer the symbol-level tools. A **SessionStart hook** nudges the
-model to use `code_*` for source files, and the three dashboard/status commands
-remain available.
+server with client-specific launch paths. Claude expands
+`${CLAUDE_PLUGIN_ROOT}` in its manifest; Codex launches `./dist/server.js` with
+the installed plugin root as `cwd` only as a discoverable fallback. Project-
+relative work is guarded in that mode; the one-time installer supplies the real
+workspace-preserving launch. The OpenAI plugin also bundles a `mozcode` skill
+that teaches supported models when to prefer the symbol-level tools. A
+**SessionStart hook** nudges the model to use `code_*` for source files, and the
+three dashboard/status commands remain available.
 
 ## The status line
 
@@ -83,6 +102,13 @@ a plugin cannot declare one. So the SessionStart hook registers MOZCODE's status
 line in `~/.claude/settings.json` for you, and tells you in-session the one time
 it does so. It refreshes every 5 seconds on top of Claude Code's event-driven
 updates, so the figures move as tools run rather than only at turn boundaries.
+
+Codex currently supports an ordered list of built-in TUI footer items, not a
+plugin-provided command item. MOZCODE therefore does not write an unsupported
+entry into `~/.codex/config.toml`. In Codex, use `moz_savings` for the same
+session/all-time figures on demand; the MCP server still records every tool call
+live. A native live MOZCODE footer will require Codex to expose a custom status
+item or command API.
 
 The install is deliberately conservative:
 
@@ -124,7 +150,7 @@ on its face.
 
 ```javascript
 Claude Code / Codex / OpenAI model session
-  ├─ .mcp.json spawns  node dist/server.js   (local stdio)
+  ├─ Claude manifest or Codex absolute registration spawns node dist/server.js
   │     └─ 4 code tools + db_schema + 3 moz_* tools; records metering in-process
   ├─ hooks/session-start.mjs   → CWD + "prefer code_* tools" nudge
   └─ commands/                 → /moz-savings /moz-status /moz-dashboard
