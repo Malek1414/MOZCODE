@@ -79,6 +79,20 @@ describe("metric derivations", () => {
     expect(m.timeSavedSec).toBeGreaterThan(0);
     expect(m.efficiencyGainPct).toBeGreaterThan(80);
   });
+
+  it("does not count failed edits or empty searches as avoided round-trips", () => {
+    const failed = [
+      entry({ tool: "code_edit", baselineTokens: 0, actualTokens: 40, savedTokens: 0 }),
+      entry({ tool: "code_edit", baselineTokens: 0, actualTokens: 35, savedTokens: 0 }),
+      entry({ tool: "code_search", path: undefined, baselineTokens: 1, actualTokens: 10, savedTokens: 0 }),
+      entry({ tool: "db_schema", baselineTokens: 0, actualTokens: 30, savedTokens: 0 }),
+    ];
+    expect(computeMetrics(summarize([...dataset, ...failed]), []).callsSaved).toBe(11);
+    const none = computeMetrics(summarize(failed), []);
+    expect(none.callsSaved).toBe(0);
+    expect(none.costSaved).toBe(0);
+    expect(none.timeSavedSec).toBe(0);
+  });
 });
 
 describe("openInBrowser", () => {

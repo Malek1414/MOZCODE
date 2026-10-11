@@ -138,14 +138,15 @@ export interface Summary {
   totalSaved: number;
   avgReductionPct: number;
   projects: number;
-  byTool: { tool: string; calls: number; saved: number }[];
+  /** `savingCalls` counts calls that actually saved tokens (not failed or empty ones). */
+  byTool: { tool: string; calls: number; savingCalls: number; saved: number }[];
   byDay: { day: string; saved: number }[];
   byFile: { path: string; calls: number; saved: number }[];
   bySession: { session: string; calls: number; baseline: number; actual: number; saved: number }[];
 }
 
 export function summarize(entries: MeteringEntry[], topFiles = 15): Summary {
-  const byTool = new Map<string, { calls: number; saved: number }>();
+  const byTool = new Map<string, { calls: number; savingCalls: number; saved: number }>();
   const byDay = new Map<string, number>();
   const byFile = new Map<string, { calls: number; saved: number }>();
   const bySession = new Map<string, { calls: number; baseline: number; actual: number; saved: number }>();
@@ -161,8 +162,9 @@ export function summarize(entries: MeteringEntry[], topFiles = 15): Summary {
     totalSaved += e.savedTokens;
     projects.add(e.project);
 
-    const t = byTool.get(e.tool) ?? { calls: 0, saved: 0 };
+    const t = byTool.get(e.tool) ?? { calls: 0, savingCalls: 0, saved: 0 };
     t.calls += 1;
+    if (e.savedTokens > 0) t.savingCalls += 1;
     t.saved += e.savedTokens;
     byTool.set(e.tool, t);
 

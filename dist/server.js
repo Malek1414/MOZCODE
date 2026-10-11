@@ -27061,8 +27061,9 @@ function summarize(entries, topFiles2 = 15) {
     totalActual += e.actualTokens;
     totalSaved += e.savedTokens;
     projects.add(e.project);
-    const t = byTool.get(e.tool) ?? { calls: 0, saved: 0 };
+    const t = byTool.get(e.tool) ?? { calls: 0, savingCalls: 0, saved: 0 };
     t.calls += 1;
+    if (e.savedTokens > 0) t.savingCalls += 1;
     t.saved += e.savedTokens;
     byTool.set(e.tool, t);
     const day = e.ts.slice(0, 10);
@@ -27113,9 +27114,10 @@ var DEFAULT_ASSUMPTIONS = {
 };
 function computeMetrics(summary, _entries, a = DEFAULT_ASSUMPTIONS) {
   const tokensSaved = summary.totalSaved;
-  const editCalls = summary.byTool.find((t) => t.tool === "code_edit")?.calls ?? 0;
-  const searchCalls = summary.byTool.find((t) => t.tool === "code_search")?.calls ?? 0;
-  const dbSchemaCalls = summary.byTool.find((t) => t.tool === "db_schema")?.calls ?? 0;
+  const saving = (tool) => summary.byTool.find((t) => t.tool === tool)?.savingCalls ?? 0;
+  const editCalls = saving("code_edit");
+  const searchCalls = saving("code_search");
+  const dbSchemaCalls = saving("db_schema");
   const callsSaved = Math.round(
     editCalls + searchCalls * a.searchCallFactor + dbSchemaCalls * a.dbCallsAvoidedPerSchema
   );

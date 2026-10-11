@@ -48,9 +48,13 @@ export function computeMetrics(
   a: MetricAssumptions = DEFAULT_ASSUMPTIONS,
 ): KpiMetrics {
   const tokensSaved = summary.totalSaved;
-  const editCalls = summary.byTool.find((t) => t.tool === "code_edit")?.calls ?? 0;
-  const searchCalls = summary.byTool.find((t) => t.tool === "code_search")?.calls ?? 0;
-  const dbSchemaCalls = summary.byTool.find((t) => t.tool === "db_schema")?.calls ?? 0;
+  // Only calls that saved tokens avoided anything: a failed edit (older ledgers
+  // metered those with baseline 0), a no-match search or a failed schema call
+  // replaced no round-trip.
+  const saving = (tool: string) => summary.byTool.find((t) => t.tool === tool)?.savingCalls ?? 0;
+  const editCalls = saving("code_edit");
+  const searchCalls = saving("code_search");
+  const dbSchemaCalls = saving("db_schema");
 
   // Round-trips avoided: each AST-anchored edit avoids a re-read; each search
   // consolidates file-opening turns; each schema map replaces iterative discovery.
