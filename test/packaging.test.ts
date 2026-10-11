@@ -195,6 +195,24 @@ describe("statusline self-install (filesystem)", () => {
     await expect(fs.access(settingsPath)).rejects.toThrow();
   });
 
+  it("writes through a symlinked settings.json and keeps its mode", async () => {
+    if (process.platform === "win32") return;
+    const real = join(dir, "dotfiles", "claude-settings.json");
+    await fs.mkdir(dirname(real), { recursive: true });
+    await fs.writeFile(real, JSON.stringify({ model: "opus" }), "utf8");
+    await fs.chmod(real, 0o600);
+    await fs.mkdir(dirname(settingsPath), { recursive: true });
+    await fs.symlink(real, settingsPath);
+
+    expect(await installStatusLine(settingsPath, root)).toBe("install");
+    expect((await fs.lstat(settingsPath)).isSymbolicLink()).toBe(true);
+    const written = JSON.parse(await fs.readFile(real, "utf8"));
+    expect(written.model).toBe("opus");
+    expect(written.statusLine.command).toBe(statusLineCommand(root));
+    expect((await fs.stat(real)).mode & 0o777).toBe(0o600);
+    expect((await fs.readdir(dirname(real))).filter((f) => f.includes("tmp"))).toEqual([]);
+  });
+
   it("leaves no temp files behind", async () => {
     await installStatusLine(settingsPath, root);
     const leftover = (await fs.readdir(dirname(settingsPath))).filter((f) => f.includes("tmp"));

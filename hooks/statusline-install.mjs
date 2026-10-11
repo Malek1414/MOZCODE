@@ -116,12 +116,26 @@ export async function installStatusLine(settingsPath, pluginRoot, env = {}) {
       return "error";
     }
 
-    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    // Write through a symlink (dotfile managers link settings.json into a repo)
+    // instead of replacing the link with a regular file, and keep the file mode.
+    let target = settingsPath;
+    let mode;
+    if (raw !== undefined) {
+      target = await fs.realpath(settingsPath);
+      mode = (await fs.stat(target)).mode & 0o7777;
+    }
+    await fs.mkdir(path.dirname(target), { recursive: true });
     // Write via temp file + rename so a crash mid-write cannot truncate the
     // user's settings.
-    const tmp = `${settingsPath}.mozcode-${process.pid}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(plan.settings, null, 2) + "\n", "utf8");
-    await fs.rename(tmp, settingsPath);
+    const tmp = `${target}.mozcode-${process.pid}.tmp`;
+    try {
+      await fs.writeFile(tmp, JSON.stringify(plan.settings, null, 2) + "\n", { encoding: "utf8", mode });
+      if (mode !== undefined) await fs.chmod(tmp, mode);
+      await fs.rename(tmp, target);
+    } catch (err) {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
     return plan.action;
   } catch {
     return "error";
