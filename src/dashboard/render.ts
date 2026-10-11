@@ -311,7 +311,7 @@ export function renderDashboard(summary: Summary, generatedAt = new Date()): str
       <li>Prefill saved: <strong>${a.prefillSecPer1k}s</strong> / 1k tokens</li>
       <li>Search→call factor: <strong>${a.searchCallFactor}</strong></li>
       <li>DB discovery turns avoided per schema call: <strong>${a.dbCallsAvoidedPerSchema}</strong></li>
-      <li>Token estimate: <strong>~4 chars/token</strong></li>
+      <li>Token estimate: <strong>o200k_base BPE</strong> (a proxy, not a Claude count; ~4 chars/token only if the tokenizer fails)</li>
     </ul>
     <p class="foot">MOZCODE is an open-source, clean-room implementation inspired by a public teardown of WOZCODE. Not affiliated with Woz. Typeface: Saira (OFL-1.1).</p>
   </div>

@@ -141,7 +141,9 @@ disclosed assumptions.
 
 Savings are an **estimate against a counterfactual**. MOZCODE knows what it returned
 and what a naive whole-file `Read` / plain `grep` of the same target *would have*
-returned, and records the difference. Tokens are estimated at \~4 chars/token. This
+returned, and records the difference. Tokens are counted with the o200k_base BPE
+tokenizer (`gpt-tokenizer`) as a proxy; it is not a Claude token count, and
+\~4 chars/token is used only if that tokenizer fails. This
 illustrates the mechanism; it is **not a billing figure**, and the baseline (what
 you would have spent otherwise) cannot be directly observed. The dashboard says so
 on its face.
@@ -173,7 +175,8 @@ to a single SessionStart nudge (rather than intercepting every tool call).
 ```bash
 
 npm test          # engine, tools, DB schema, metering, dashboard, stdio integration
-npm run build     # tsc + bundle grammars into grammars/
+npm run build     # esbuild bundle into dist/ + copy grammars into grammars/ (no type check)
+npm run typecheck # tsc --noEmit
 npm run dev       # run the server from source (tsx)
 npm run benchmark:performance  # DB discovery + raw cold/warm latency
 ```
