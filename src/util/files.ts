@@ -79,7 +79,3 @@ export function matchesGlob(filePath: string, glob: string): boolean {
   if (!pattern.includes("/")) return rx.test(path.posix.basename(normalized));
   return rx.test(normalized);
 }
-
-export async function readFileSafe(filePath: string): Promise<string> {
-  return fs.readFile(filePath, "utf8");
-}
