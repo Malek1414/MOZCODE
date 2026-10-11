@@ -48,9 +48,13 @@ export function computeMetrics(
   a: MetricAssumptions = DEFAULT_ASSUMPTIONS,
 ): KpiMetrics {
   const tokensSaved = summary.totalSaved;
-  const editCalls = summary.byTool.find((t) => t.tool === "code_edit")?.calls ?? 0;
-  const searchCalls = summary.byTool.find((t) => t.tool === "code_search")?.calls ?? 0;
-  const dbSchemaCalls = summary.byTool.find((t) => t.tool === "db_schema")?.calls ?? 0;
+  // Only calls that saved tokens avoided anything: a failed edit (older ledgers
+  // metered those with baseline 0), a no-match search or a failed schema call
+  // replaced no round-trip.
+  const saving = (tool: string) => summary.byTool.find((t) => t.tool === tool)?.savingCalls ?? 0;
+  const editCalls = saving("code_edit");
+  const searchCalls = saving("code_search");
+  const dbSchemaCalls = saving("db_schema");
 
   // Round-trips avoided: each AST-anchored edit avoids a re-read; each search
   // consolidates file-opening turns; each schema map replaces iterative discovery.
@@ -79,11 +83,12 @@ export function computeMetrics(
 
 /** Format seconds as "1h 12m", "3m 20s", or "45s". */
 export function fmtDuration(sec: number): string {
-  if (sec < 60) return `${Math.round(sec)}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
-  const h = Math.floor(sec / 3600);
-  const m = Math.round((sec % 3600) / 60);
-  return `${h}h ${m}m`;
+  // Round to the displayed unit before splitting, so 119.6s is "2m 0s", not "1m 60s".
+  const s = Math.round(sec);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  const mins = Math.round(sec / 60);
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
 /** Format USD: $0.0123 for small, $12.34 otherwise. */

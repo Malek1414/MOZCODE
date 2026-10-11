@@ -3,7 +3,13 @@
 // MOZCODE's symbol-level tools over the built-in whole-file Read/Grep, and
 // register MOZCODE's savings status line in the user's settings (a plugin
 // cannot declare `statusLine` in its manifest — see statusline-install.mjs).
+//
+// Codex runs this script too, via .codex-plugin/hooks.json with --host=codex.
+// There it must not touch ~/.claude/settings.json (that would point Claude
+// Code's status line at the Codex plugin copy), and the nudge names Codex's
+// own tools instead of Claude Code's Read/Grep.
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { installStatusLine, defaultSettingsPath } from "./statusline-install.mjs";
 
 let input = "";
@@ -20,24 +26,41 @@ try {
   /* ignore */
 }
 
-// Install/refresh the status line. Best-effort: never blocks or breaks startup.
-const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || new URL("..", import.meta.url).pathname;
-let statusLineAction = "error";
-try {
-  statusLineAction = await installStatusLine(defaultSettingsPath(), pluginRoot, process.env);
-} catch {
-  /* a status line is a convenience; startup must not depend on it */
+const isCodex = process.argv.includes("--host=codex");
+
+// Install/refresh the status line (Claude Code only). Best-effort: never blocks
+// or breaks startup.
+// fileURLToPath, not URL.pathname: pathname stays percent-encoded ("%20") and is
+// "/C:/..." on Windows, which would write a broken status line command.
+const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || fileURLToPath(new URL("..", import.meta.url));
+let statusLineAction = "skipped";
+if (!isCodex) {
+  try {
+    statusLineAction = await installStatusLine(defaultSettingsPath(), pluginRoot, process.env);
+  } catch {
+    statusLineAction = "error"; /* a status line is a convenience; startup must not depend on it */
+  }
 }
 
-const lines = [
-  `MOZCODE is active in ${cwd}.`,
-  `For SOURCE CODE files, prefer MOZCODE's tools to save tokens:`,
-  `• code_outline / code_read (with a symbol) instead of the built-in Read — they return one symbol, not the whole file.`,
-  `• code_search instead of Grep — it groups hits by enclosing function/class.`,
-  `• code_edit to replace a whole function/class without re-reading the file.`,
-  `• db_schema before database work — it maps SQLite/PostgreSQL structure in one metadata-only call.`,
-  `Use the built-in Read/Edit only for non-code files or tiny in-line tweaks.`,
-];
+const lines = isCodex
+  ? [
+      `MOZCODE is active in ${cwd}.`,
+      `For SOURCE CODE files, prefer MOZCODE's MCP tools to save tokens:`,
+      `• code_outline / code_read (with a symbol) instead of printing whole files with cat/sed in the shell — they return one symbol, not the whole file.`,
+      `• code_search instead of rg/grep in the shell — it groups hits by enclosing function/class.`,
+      `• code_edit to replace a whole function/class without re-reading the file.`,
+      `• db_schema before database work — it maps SQLite/PostgreSQL structure in one metadata-only call.`,
+      `Use the shell and apply_patch only for non-code files or tiny in-line tweaks.`,
+    ]
+  : [
+      `MOZCODE is active in ${cwd}.`,
+      `For SOURCE CODE files, prefer MOZCODE's tools to save tokens:`,
+      `• code_outline / code_read (with a symbol) instead of the built-in Read — they return one symbol, not the whole file.`,
+      `• code_search instead of Grep — it groups hits by enclosing function/class.`,
+      `• code_edit to replace a whole function/class without re-reading the file.`,
+      `• db_schema before database work — it maps SQLite/PostgreSQL structure in one metadata-only call.`,
+      `Use the built-in Read/Edit only for non-code files or tiny in-line tweaks.`,
+    ];
 
 // Tell the user once, in the session where it happens, that we touched their
 // global settings — silently editing a user's config would not be acceptable.

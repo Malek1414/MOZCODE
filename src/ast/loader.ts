@@ -46,9 +46,15 @@ function runtimeWasm(): string {
 export async function initParser(): Promise<void> {
   if (!initPromise) {
     const rt = runtimeWasm();
-    initPromise = Parser.init({
+    const pending: Promise<void> = Parser.init({
       locateFile: (name: string) => (name.endsWith(".wasm") ? rt : name),
     } as never);
+    initPromise = pending;
+    // Don't cache a failure: a transient error would otherwise disable every
+    // AST feature until the server restarts.
+    pending.catch(() => {
+      if (initPromise === pending) initPromise = null;
+    });
   }
   return initPromise;
 }
@@ -62,15 +68,38 @@ export async function loadLanguage(id: LanguageId): Promise<Language> {
       return Language.load(path.join(assetsDir(), GRAMMAR_FILE[id]));
     })();
     languageCache.set(id, cached);
+    const pending = cached;
+    pending.catch(() => {
+      if (languageCache.get(id) === pending) languageCache.delete(id);
+    });
   }
   return cached;
 }
 
-/** A ready-to-use parser configured for the given language. */
+const parserCache = new Map<LanguageId, Promise<Parser>>();
+
+/**
+ * A ready-to-use parser configured for the given language, shared per language.
+ *
+ * Parsers live in the WASM heap, which never shrinks and is not garbage
+ * collected, so creating one per parse leaked memory for the life of the
+ * server. Sharing is safe: Parser#parse is synchronous, so two callers can
+ * never interleave inside one parse.
+ */
 export async function parserFor(id: LanguageId): Promise<Parser> {
-  await initParser();
-  const language = await loadLanguage(id);
-  const parser = new Parser();
-  parser.setLanguage(language);
-  return parser;
+  let cached = parserCache.get(id);
+  if (!cached) {
+    cached = (async () => {
+      const language = await loadLanguage(id);
+      const parser = new Parser();
+      parser.setLanguage(language);
+      return parser;
+    })();
+    parserCache.set(id, cached);
+    const pending = cached;
+    pending.catch(() => {
+      if (parserCache.get(id) === pending) parserCache.delete(id);
+    });
+  }
+  return cached;
 }

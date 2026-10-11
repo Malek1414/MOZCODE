@@ -59,6 +59,8 @@ export interface DbSchemaOptions {
 interface SqliteCacheEntry {
   mtimeMs: number;
   size: number;
+  /** "mtime:size" of the -wal file, or "" when there is none. */
+  wal: string;
   snapshot: Promise<DbSnapshot>;
 }
 
@@ -110,10 +112,10 @@ function asNumber(value: unknown): number {
   return typeof value === "number" ? value : Number(value);
 }
 
-function groupRows(rows: Row[], key: string): Map<string, Row[]> {
+function groupRows(rows: Row[], keyOf: (row: Row) => string): Map<string, Row[]> {
   const grouped = new Map<string, Row[]>();
   for (const row of rows) {
-    const name = asText(row[key]);
+    const name = keyOf(row);
     const values = grouped.get(name) ?? [];
     values.push(row);
     grouped.set(name, values);
@@ -122,9 +124,10 @@ function groupRows(rows: Row[], key: string): Map<string, Row[]> {
 }
 
 function sqliteSnapshot(source: string, tables: Row[], columns: Row[], fks: Row[], indexes: Row[]): DbSnapshot {
-  const columnsByTable = groupRows(columns, "table_name");
-  const fksByTable = groupRows(fks, "table_name");
-  const indexesByTable = groupRows(indexes, "table_name");
+  const byTable = (row: Row) => asText(row.table_name);
+  const columnsByTable = groupRows(columns, byTable);
+  const fksByTable = groupRows(fks, byTable);
+  const indexesByTable = groupRows(indexes, byTable);
 
   const objects: DbObject[] = tables.map((table) => {
     const name = asText(table.name);
@@ -188,6 +191,9 @@ async function querySqliteNative(filePath: string): Promise<[Row[], Row[], Row[]
 async function querySqliteCli(filePath: string, sql: string): Promise<Row[]> {
   const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", filePath, sql], {
     maxBuffer: 16 * 1024 * 1024,
+    // A locked or huge database must not hold the tool call open forever.
+    timeout: 10_000,
+    killSignal: "SIGKILL",
   });
   return stdout.trim() ? JSON.parse(stdout) as Row[] : [];
 }
@@ -213,15 +219,29 @@ async function inspectSqlite(filePath: string): Promise<DbSnapshot> {
   return sqliteSnapshot(filePath, ...rows);
 }
 
+/**
+ * In WAL mode, committed schema changes live in the -wal file until a
+ * checkpoint copies them into the main file, so its stat is part of the key.
+ */
+async function walStamp(filePath: string): Promise<string> {
+  try {
+    const wal = await fs.stat(`${filePath}-wal`);
+    return `${wal.mtimeMs}:${wal.size}`;
+  } catch {
+    return "";
+  }
+}
+
 async function cachedSqlite(filePath: string, refresh: boolean): Promise<DbSnapshot> {
-  const stat = await fs.stat(filePath);
+  const [stat, wal] = await Promise.all([fs.stat(filePath), walStamp(filePath)]);
   const cached = sqliteCache.get(filePath);
-  if (!refresh && cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+  if (!refresh && cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.wal === wal) {
     return cached.snapshot;
   }
   const entry: SqliteCacheEntry = {
     mtimeMs: stat.mtimeMs,
     size: stat.size,
+    wal,
     snapshot: inspectSqlite(filePath),
   };
   sqliteCache.set(filePath, entry);
@@ -284,27 +304,71 @@ function pgKey(schema: unknown, table: unknown): string {
   return `${asText(schema)}.${asText(table)}`;
 }
 
-function indexColumns(definition: string): string[] {
-  const match = definition.match(/\(([^)]+)\)/);
-  return match ? match[1].split(",").map((column) => column.trim().replace(/^"|"$/g, "")) : [];
+/** Index just past the ")" that closes the "(" at `open`, skipping quoted text. */
+function closingParen(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") {
+      const end = text.indexOf(ch, i + 1);
+      if (end < 0) return text.length;
+      i = end; // a doubled quote ("" or '') just reopens on the next char
+    } else if (ch === "(") depth++;
+    else if (ch === ")" && --depth === 0) return i + 1;
+  }
+  return text.length;
+}
+
+/** Split on commas that are not nested in parentheses or quotes. */
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(") i = closingParen(text, i) - 1;
+    else if (ch === '"' || ch === "'") {
+      const end = text.indexOf(ch, i + 1);
+      i = end < 0 ? text.length : end;
+    } else if (ch === ",") {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+const PLAIN_INDEX_COLUMN = /^("(?:[^"]|"")*"|[A-Za-z_][\w$]*)(?:\s|$)/;
+
+/**
+ * Key columns of a pg_indexes.indexdef, e.g.
+ * `CREATE INDEX i ON public.t USING btree (lower((email)::text), id DESC) INCLUDE (x) WHERE (...)`
+ * gives ["lower((email)::text)", "id"]. Plain columns drop opclass/ordering/collation
+ * options; expressions are kept verbatim.
+ */
+export function indexColumns(definition: string): string[] {
+  const using = /\sUSING\s+\S+\s*\(/i.exec(definition);
+  const open = using ? using.index + using[0].length - 1 : definition.indexOf("(");
+  if (open < 0) return [];
+  const list = definition.slice(open + 1, closingParen(definition, open) - 1);
+  return splitTopLevel(list).map((element) => {
+    const plain = PLAIN_INDEX_COLUMN.exec(element);
+    if (plain) {
+      const name = plain[1];
+      return name.startsWith('"') ? name.slice(1, -1).replace(/""/g, '"') : name;
+    }
+    // Expression: keep the parenthesised/function-call part, drop trailing options.
+    const paren = element.indexOf("(");
+    return paren < 0 ? element : element.slice(0, closingParen(element, paren)).trim();
+  });
 }
 
 function postgresSnapshot(source: string, tables: Row[], columns: Row[], fks: Row[], indexes: Row[]): DbSnapshot {
-  const columnsByTable = new Map<string, Row[]>();
-  const fksByTable = new Map<string, Row[]>();
-  const indexesByTable = new Map<string, Row[]>();
-  for (const row of columns) {
-    const key = pgKey(row.table_schema, row.table_name);
-    columnsByTable.set(key, [...(columnsByTable.get(key) ?? []), row]);
-  }
-  for (const row of fks) {
-    const key = pgKey(row.table_schema, row.table_name);
-    fksByTable.set(key, [...(fksByTable.get(key) ?? []), row]);
-  }
-  for (const row of indexes) {
-    const key = pgKey(row.table_schema, row.table_name);
-    indexesByTable.set(key, [...(indexesByTable.get(key) ?? []), row]);
-  }
+  // Appending in place: copying the group's array per row was O(k^2) for a table with k columns.
+  const byTable = (row: Row) => pgKey(row.table_schema, row.table_name);
+  const columnsByTable = groupRows(columns, byTable);
+  const fksByTable = groupRows(fks, byTable);
+  const indexesByTable = groupRows(indexes, byTable);
 
   const objects: DbObject[] = tables.map((table) => {
     const schema = asText(table.table_schema);
@@ -353,21 +417,52 @@ async function inspectPostgres(connectionString: string, source: string): Promis
   });
   await client.connect();
   try {
+    // Defense in depth for a tool advertised as read-only: run the catalog
+    // queries in a READ ONLY transaction with server-side limits. query_timeout
+    // only stops the client waiting; statement_timeout makes the server cancel.
+    // SET LOCAL (not startup parameters) so this also works through poolers
+    // such as PgBouncer in transaction mode.
+    await client.query("BEGIN READ ONLY");
+    await client.query("SET LOCAL statement_timeout = 10000");
+    await client.query("SET LOCAL lock_timeout = 5000");
     const tables = await client.query(POSTGRES_TABLES_SQL);
     const columns = await client.query(POSTGRES_COLUMNS_SQL);
     const fks = await client.query(POSTGRES_FKS_SQL);
     const indexes = await client.query(POSTGRES_INDEXES_SQL);
+    await client.query("ROLLBACK");
     return postgresSnapshot(source, tables.rows, columns.rows, fks.rows, indexes.rows);
   } finally {
     await client.end();
   }
 }
 
-async function cachedPostgres(connectionEnv: string, refresh: boolean): Promise<DbSnapshot> {
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const POSTGRES_URL = /^postgres(?:ql)?:\/\//i;
+
+/**
+ * connection_env is chosen by the model, so a prompt-injected call could name
+ * any variable in the server's environment (an API key, a token). Only use a
+ * value that is actually a PostgreSQL URL; anything else is refused without
+ * being parsed, dialed, or echoed back.
+ */
+function postgresUrlFromEnv(connectionEnv: string): string {
+  if (!ENV_NAME.test(connectionEnv)) {
+    throw new Error("connection_env must be an environment variable name (letters, digits, underscore).");
+  }
   const connectionString = process.env[connectionEnv];
   if (!connectionString) {
     throw new Error(`PostgreSQL connection environment variable ${connectionEnv} is not set.`);
   }
+  if (!POSTGRES_URL.test(connectionString.trim())) {
+    throw new Error(
+      `Environment variable ${connectionEnv} does not hold a postgres:// or postgresql:// URL, so db_schema will not use it.`,
+    );
+  }
+  return connectionString.trim();
+}
+
+async function cachedPostgres(connectionEnv: string, refresh: boolean): Promise<DbSnapshot> {
+  const connectionString = postgresUrlFromEnv(connectionEnv);
   const now = Date.now();
   const connectionFingerprint = createHash("sha256").update(connectionString).digest("hex");
   const cached = postgresCache.get(connectionEnv);
@@ -422,6 +517,11 @@ function renderObject(object: DbObject): string {
   return `${object.kind === "view" ? "view " : ""}${qualifiedName(object)}(${columns.join(", ")})${indexes}`;
 }
 
+/** Characters of rendered schema objects per db_schema result (roughly 12k tokens). */
+const SCHEMA_TEXT_BUDGET = 50_000;
+/** Characters spent naming the objects that did not fit. */
+const OMITTED_NAMES_BUDGET = 8_000;
+
 function renderSnapshot(snapshot: DbSnapshot, query?: string): { text: string; objects: DbObject[] } {
   const needle = query?.trim().toLowerCase();
   const objects = needle
@@ -433,7 +533,35 @@ function renderSnapshot(snapshot: DbSnapshot, query?: string): { text: string; o
   const scope = needle ? `; ${objects.length} objects match "${query}"` : "";
   const header = `${snapshot.source} — ${snapshot.dialect} schema: ${tableCount} tables, ${viewCount} views, ${columnCount} columns${scope}`;
   if (objects.length === 0) return { text: `${header}\n(no matching schema objects)`, objects };
-  return { text: `${header}\n${objects.map(renderObject).join("\n")}`, objects };
+
+  // A schema with thousands of tables would otherwise come back in one result
+  // far larger than the context it is meant to save. Render whole objects up
+  // to the budget, then name the rest so the model can narrow with `query`.
+  const lines: string[] = [];
+  let chars = 0;
+  for (const object of objects) {
+    const line = renderObject(object);
+    if (lines.length > 0 && chars + line.length > SCHEMA_TEXT_BUDGET) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  const omitted = objects.slice(lines.length);
+  if (omitted.length > 0) {
+    const names: string[] = [];
+    let nameChars = 0;
+    for (const object of omitted) {
+      const name = qualifiedName(object);
+      if (nameChars + name.length > OMITTED_NAMES_BUDGET) break;
+      names.push(name);
+      nameChars += name.length + 2;
+    }
+    const rest = omitted.length - names.length;
+    lines.push(
+      `… ${omitted.length} more objects not shown (output budget); pass query to filter by table, column or index name. ` +
+        `Not shown: ${names.join(", ")}${rest > 0 ? `, and ${rest} more` : ""}`,
+    );
+  }
+  return { text: `${header}\n${lines.join("\n")}`, objects };
 }
 
 /**

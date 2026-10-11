@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
-import { loadEntries, summarize, mozcodeHome } from "../metering/store.js";
+import { loadEntries, summarize, mozcodeHome, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "../metering/store.js";
 import { renderDashboard } from "./render.js";
 
 function wrap(body: string): string {
@@ -24,16 +24,21 @@ export async function generateDashboard(): Promise<{ path: string; totalSaved: n
   const summary = summarize(await loadEntries());
   const html = wrap(renderDashboard(summary));
   const out = path.join(mozcodeHome(), "dashboard.html");
-  await fs.mkdir(mozcodeHome(), { recursive: true });
-  await fs.writeFile(out, html, "utf8");
+  await fs.mkdir(mozcodeHome(), { recursive: true, mode: PRIVATE_DIR_MODE });
+  await fs.writeFile(out, html, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   return { path: out, totalSaved: summary.totalSaved, calls: summary.calls };
 }
 
 /** Best-effort open in the default browser. */
 export function openInBrowser(target: string): void {
-  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  // explorer.exe opens a file with its default handler without going through a
+  // shell, so a path with spaces or shell metacharacters stays one argument.
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
   try {
-    const child = spawn(cmd, [target], { detached: true, stdio: "ignore", shell: process.platform === "win32" });
+    const child = spawn(cmd, [target], { detached: true, stdio: "ignore" });
+    // A missing opener (no xdg-open on a headless box) is reported as an async
+    // 'error' event; unhandled, it would crash the MCP server.
+    child.on("error", () => {});
     child.unref();
   } catch {
     /* opening is best-effort */

@@ -118,10 +118,10 @@ function areaChart(byDay: { day: string; cumulative: number }[]): string {
       return `<line x1="${pad.l}" y1="${gy}" x2="${w - pad.r}" y2="${gy}" class="grid"/><text x="${pad.l - 8}" y="${gy + 4}" text-anchor="end" class="tick">${fmt(f * maxY)}</text>`;
     })
     .join("");
-  const dots = byDay.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.cumulative).toFixed(1)}" r="3.5" fill="var(--series-1)"><title>${p.day}: ${comma(p.cumulative)}</title></circle>`).join("");
+  const dots = byDay.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.cumulative).toFixed(1)}" r="3.5" fill="var(--series-1)"><title>${esc(p.day)}: ${comma(p.cumulative)}</title></circle>`).join("");
   const xl = byDay
     .filter((_, i) => i === 0 || i === byDay.length - 1 || byDay.length <= 5)
-    .map((p) => `<text x="${x(byDay.indexOf(p)).toFixed(1)}" y="${h - 10}" text-anchor="middle" class="tick">${p.day.slice(5)}</text>`)
+    .map((p) => `<text x="${x(byDay.indexOf(p)).toFixed(1)}" y="${h - 10}" text-anchor="middle" class="tick">${esc(p.day.slice(5))}</text>`)
     .join("");
   return `<svg class="area-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Cumulative tokens saved by day" width="100%">${grid}
     <path d="${area}" fill="var(--series-1)" opacity="0.12"/><path d="${line}" fill="none" stroke="var(--series-1)" stroke-width="2"/>${dots}${xl}</svg>`;
@@ -311,7 +311,7 @@ export function renderDashboard(summary: Summary, generatedAt = new Date()): str
       <li>Prefill saved: <strong>${a.prefillSecPer1k}s</strong> / 1k tokens</li>
       <li>Search→call factor: <strong>${a.searchCallFactor}</strong></li>
       <li>DB discovery turns avoided per schema call: <strong>${a.dbCallsAvoidedPerSchema}</strong></li>
-      <li>Token estimate: <strong>~4 chars/token</strong></li>
+      <li>Token estimate: <strong>o200k_base BPE</strong> (a proxy, not a Claude count; ~4 chars/token only if the tokenizer fails)</li>
     </ul>
     <p class="foot">MOZCODE is an open-source, clean-room implementation inspired by a public teardown of WOZCODE. Not affiliated with Woz. Typeface: Saira (OFL-1.1).</p>
   </div>

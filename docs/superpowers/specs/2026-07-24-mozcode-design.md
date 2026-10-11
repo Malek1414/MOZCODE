@@ -1,6 +1,17 @@
 # MOZCODE — Symbol-Level MCP Server for Claude Code
 
-*Design spec · 2026-07-24 · Status: approved, executing*
+*Design spec · 2026-07-24 · Status: historical (implemented, then diverged)*
+
+> **This is the original design, kept for history. It no longer describes the code.**
+> Where they differ, `README.md` and `src/` are authoritative. Known divergences:
+> there is no PostToolUse hook (metering is recorded in-process by the MCP server,
+> `src/server.ts`); symbols are extracted by walking the tree in `src/ast/engine.ts`,
+> not by `.scm` queries; search scans files in-process rather than through ripgrep;
+> Haiku subagents now ship in `agents/`; the spec does not cover `db_schema`
+> (`src/db/schema.ts`), the status line (`src/statusline.ts`,
+> `hooks/statusline-install.mjs`) or Codex support (`.codex-plugin/`); and metering
+> entries use camelCase fields in `~/.mozcode/metering/<name>-<hash>.jsonl`
+> (`src/metering/store.ts`).
 
 ## Provenance & legal
 

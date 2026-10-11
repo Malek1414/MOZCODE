@@ -1,5 +1,5 @@
 import { resolveSymbol } from "../ast/engine.js";
-import { analyzeFile } from "../ast/file-cache.js";
+import { analyzeFile, sourceTokensOf } from "../ast/file-cache.js";
 import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 import { renderOutline } from "./outline.js";
@@ -20,19 +20,69 @@ function withContext(source: string, startLine: number, endLine: number, context
     .join("\n");
 }
 
-export async function codeRead(absPath: string, relPath: string, opts: ReadOptions = {}): Promise<ToolResult> {
-  const { source, language, symbols, hasError } = await analyzeFile(absPath);
-  const baseline = estimateTokens(source);
-  const context = opts.contextLines ?? 3;
+/**
+ * Caps for the plain-text fallback. Logs, JSON dumps and bundles can be many
+ * MB; returning them whole would cost more tokens than the built-in Read,
+ * which itself stops at 2000 lines.
+ */
+export const PLAIN_READ_MAX_LINES = 2000;
+export const PLAIN_READ_MAX_CHARS = 100_000;
 
-  // Unsupported language -> plain (numbered) whole-file read.
-  if (!language) {
-    const numbered = source
-      .split("\n")
-      .map((l, i) => `${String(i + 1).padStart(4)}  ${l}`)
-      .join("\n");
+/** Line-numbered head of a file, within PLAIN_READ_MAX_LINES and PLAIN_READ_MAX_CHARS. */
+function numberedHead(source: string): { text: string; shownLines: number; totalLines: number; complete: boolean } {
+  const lines = source.split("\n");
+  const out: string[] = [];
+  let chars = 0;
+  let lineCut = false;
+  for (let i = 0; i < lines.length && i < PLAIN_READ_MAX_LINES; i++) {
+    let line = `${String(i + 1).padStart(4)}  ${lines[i]}`;
+    if (chars + line.length > PLAIN_READ_MAX_CHARS) {
+      // Always show something, even when the first line alone is over the cap (minified files).
+      if (out.length > 0) break;
+      line = line.slice(0, PLAIN_READ_MAX_CHARS) + " [line truncated]";
+      lineCut = true;
+    }
+    out.push(line);
+    chars += line.length + 1;
+  }
+  return {
+    text: out.join("\n"),
+    shownLines: out.length,
+    totalLines: lines.length,
+    complete: !lineCut && out.length === lines.length,
+  };
+}
+
+const DEFAULT_CONTEXT = 3;
+const MAX_CONTEXT = 200;
+
+/**
+ * Normalize context_lines from untrusted tool input. A string ("2") would turn
+ * `endLine + context` into string concatenation, a negative value would cut the
+ * symbol short, and NaN would return nothing.
+ */
+function contextLinesOf(raw: unknown): number {
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isFinite(n)) return DEFAULT_CONTEXT;
+  return Math.min(MAX_CONTEXT, Math.max(0, Math.trunc(n)));
+}
+
+export async function codeRead(absPath: string, relPath: string, opts: ReadOptions = {}): Promise<ToolResult> {
+  const analysis = await analyzeFile(absPath);
+  const { source, language, symbols, hasError, timedOut } = analysis;
+  const baseline = sourceTokensOf(analysis);
+  const context = contextLinesOf(opts.contextLines);
+
+  // Unsupported language, or too large to parse in time -> plain (numbered) read.
+  if (!language || timedOut) {
+    const { text: numbered, shownLines, totalLines, complete } = numberedHead(source);
+    const why = language ? "too large to parse for symbol extraction" : "unsupported for symbol extraction";
+    const label = complete ? "whole file" : `first ${shownLines} of ${totalLines} lines, truncated`;
+    const more = complete
+      ? ""
+      : `\n[truncated${totalLines > shownLines ? `: ${totalLines - shownLines} more lines` : ""}; use the built-in Read with an offset for the rest]`;
     return {
-      text: `${relPath} (whole file, unsupported for symbol extraction):\n${numbered}`,
+      text: `${relPath} (${label}, ${why}):\n${numbered}${more}`,
       degraded: true,
       meta: makeMeta("code_read", relPath, baseline, estimateTokens(numbered)),
     };

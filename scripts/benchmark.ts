@@ -3,9 +3,11 @@
  * corpus (zod's source + this repo) and measure actual token reduction, so we can
  * compare the MEASURED mechanism against WOZCODE's published claims.
  *
- * Records real metering to MOZCODE_HOME so the dashboard reflects real numbers.
+ * Records its tool calls to the metering store only when MOZCODE_HOME is set
+ * explicitly, so a plain `npm run benchmark:tokens` cannot inflate the user's
+ * real ~/.mozcode dashboard and status line with synthetic "bench:corpus" rows.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { codeOutline } from "../src/tools/outline.js";
 import { codeRead } from "../src/tools/read.js";
@@ -13,9 +15,15 @@ import { codeSearch } from "../src/tools/search.js";
 import { extractSymbols, type Symbol } from "../src/ast/engine.js";
 import { languageForPath } from "../src/ast/languages.js";
 import { estimateTokens } from "../src/util/tokens.js";
-import { record } from "../src/metering/store.js";
+import { record as recordEntry } from "../src/metering/store.js";
+import type { SavingsMeta } from "../src/tools/types.js";
 
 const SESSION = "benchmark";
+const RECORD = Boolean(process.env.MOZCODE_HOME);
+
+async function record(project: string, session: string, meta: SavingsMeta): Promise<void> {
+  if (RECORD) await recordEntry(project, session, meta);
+}
 
 function walk(dir: string, out: string[] = []): string[] {
   let entries: string[];
@@ -51,8 +59,24 @@ async function main() {
     { name: "mozcode/test", dir: join(root, "test") },
   ];
 
+  const missing = corpora.filter((c) => !existsSync(c.dir));
+  if (missing.length > 0) {
+    // A silently smaller corpus would change every headline percentage.
+    console.error(`Benchmark corpus missing: ${missing.map((c) => `${c.name} (${c.dir})`).join(", ")}. Run npm ci first.`);
+    process.exit(1);
+  }
+
   const files = corpora.flatMap((c) => walk(c.dir).map((f) => ({ ...c, file: f })));
-  console.log(`Corpus: ${files.length} real source files\n`);
+  if (files.length === 0) {
+    console.error("Benchmark corpus is empty; nothing to measure.");
+    process.exit(1);
+  }
+  console.log(`Corpus: ${files.length} real source files`);
+  console.log(
+    RECORD
+      ? `Recording metering to ${process.env.MOZCODE_HOME}\n`
+      : `Not recording metering (set MOZCODE_HOME to a scratch dir to record)\n`,
+  );
 
   let fileTokTotal = 0;
   let outlineTokTotal = 0;

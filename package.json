@@ -23,6 +23,7 @@
     "build": "node scripts/bundle.mjs",
     "install:codex": "node scripts/install-codex.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify:bundle": "node scripts/verify-bundle.mjs",
     "dev": "tsx src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -30,9 +31,10 @@
     "benchmark:performance": "node --no-warnings --import tsx scripts/benchmark-performance.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.19.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "gpt-tokenizer": "^3.4.0",
     "pg": "^8.22.0",
+    "re2js": "^2.8.6",
     "tree-sitter-wasms": "^0.1.12",
     "web-tree-sitter": "^0.25.10"
   },
@@ -42,7 +44,7 @@
     "esbuild": "^0.28.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^3.0.0"
+    "vitest": "^5.0.3"
   },
   "overrides": {
     "@hono/node-server": "2.0.11"

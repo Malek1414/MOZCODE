@@ -13,6 +13,7 @@ import { dbSchema } from "./db/schema.js";
 import { record, loadEntries, summarize, mozcodeHome, writeCurrentSession } from "./metering/store.js";
 import { SUPPORTED_LANGUAGES } from "./ast/languages.js";
 import { VERSION } from "./version.js";
+import { isInsideRoot } from "./util/containment.js";
 import type { ToolResult } from "./tools/types.js";
 import { generateDashboard, openInBrowser } from "./dashboard/generate.js";
 
@@ -63,6 +64,29 @@ function resolvePaths(p: string): { abs: string; rel: string } {
     ? path.basename(abs)
     : path.relative(PROJECT, abs) || path.basename(abs);
   return { abs, rel };
+}
+
+/**
+ * code_edit is the only tool that writes. Hosts confine their own edit tools to
+ * the workspace, so a write tool that accepted any absolute or ../ path would
+ * let a prompt-injected model rewrite code anywhere the user can write (other
+ * repos, plugin hooks, global packages) without the host's boundary applying.
+ * Writes stay inside the project unless the user opts out explicitly. Reads
+ * are not confined, matching the hosts' own read tools.
+ */
+const ALLOW_EDIT_OUTSIDE_PROJECT = process.env.MOZCODE_ALLOW_EDIT_OUTSIDE_PROJECT === "1";
+
+async function editOutsideProjectError(abs: string): Promise<string | null> {
+  if (ALLOW_EDIT_OUTSIDE_PROJECT) return null;
+  const optOut = "Set MOZCODE_ALLOW_EDIT_OUTSIDE_PROJECT=1 in the server environment to allow this.";
+  if (PROJECT_UNRESOLVED) {
+    return `code_edit refused: the project is UNRESOLVED, so there is no project root to keep writes inside. ${optOut}\n\n${UNRESOLVED_MESSAGE}`;
+  }
+  if (await isInsideRoot(PROJECT, abs)) return null;
+  return (
+    `code_edit refused: ${abs} is outside the project (${PROJECT}). ` +
+    `Use the host's built-in Edit tool for files outside the project. ${optOut}`
+  );
 }
 
 async function meter(result: ToolResult): Promise<ToolResult> {
@@ -143,7 +167,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "File path (absolute or relative to the project root)." },
+        path: { type: "string", description: "File path inside the project (absolute or relative to the project root)." },
         symbol: { type: "string", description: "Symbol to replace, e.g. \"add\" or \"Account.deposit\"." },
         new_source: { type: "string", description: "The full new source for the symbol, including its signature." },
       },
@@ -253,8 +277,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "code_edit": {
         const { abs, rel } = resolvePaths(String(args.path));
-        const r = await meter(await codeEdit(abs, rel, String(args.symbol), String(args.new_source)));
-        return textResult(r.text, r.degraded && r.text.includes("rejected"));
+        const outside = await editOutsideProjectError(abs);
+        if (outside) return textResult(outside, true);
+        // Every degraded code_edit result (unsupported language, symbol not
+        // found, rejected) means the file was NOT written: report it as a tool
+        // error and don't meter it as an avoided round-trip.
+        const r = await codeEdit(abs, rel, String(args.symbol), String(args.new_source));
+        if (r.degraded) return textResult(r.text, true);
+        await meter(r);
+        return textResult(r.text);
       }
       case "db_schema": {
         const r = await meter(await dbSchema(PROJECT, {
@@ -266,8 +297,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return textResult(r.text);
       }
       case "moz_savings": {
-        const all = summarize(await loadEntries());
-        const session = summarize((await loadEntries()).filter((e) => e.session === SESSION));
+        // One read of the ledger: it holds every project's all-time history.
+        const entries = await loadEntries();
+        const all = summarize(entries);
+        const session = summarize(entries.filter((e) => e.session === SESSION));
         return textResult(
           `MOZCODE estimated savings (illustrative, not a billing figure):\n` +
             `• This session: ${session.totalSaved.toLocaleString()} tokens saved across ${session.calls} calls (${session.avgReductionPct.toFixed(0)}% avg reduction).\n` +

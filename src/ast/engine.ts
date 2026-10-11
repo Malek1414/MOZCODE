@@ -117,8 +117,11 @@ function handleTsNode(node: Node, source: string, out: Symbol[]): void {
     case "type_alias_declaration": {
       const name = nameFromField(node);
       if (name) {
-        const eq = source.indexOf("=", node.startIndex);
-        const sig = source.slice(node.startIndex, eq > -1 ? eq : node.endIndex).trim();
+        // Cut before the aliased type, not at the first "=": generic defaults
+        // (type Box<T = string> = ...) contain one too.
+        const value = node.childForFieldName("value");
+        const head = source.slice(node.startIndex, value ? value.startIndex : node.endIndex);
+        const sig = head.replace(/\s*=\s*$/, "").trim();
         out.push(mkSymbol(node, name, "type", sig, null, 0));
       }
       return;
@@ -185,9 +188,12 @@ function handlePyNode(node: Node, source: string, out: Symbol[], container: stri
     case "class_definition": {
       const name = nameFromField(node);
       if (!name) return;
-      out.push(mkSymbol(spanNode ?? node, name, "class", pySignature(node, source), container, depth));
+      const cls = mkSymbol(spanNode ?? node, name, "class", pySignature(node, source), container, depth);
+      out.push(cls);
+      // Members of a nested class are qualified by the full path (Outer.Inner.m),
+      // so they don't collide with a top-level class of the same name.
       const body = node.childForFieldName("body");
-      if (body) for (const child of body.namedChildren) if (child) handlePyNode(child, source, out, name, depth + 1);
+      if (body) for (const child of body.namedChildren) if (child) handlePyNode(child, source, out, cls.qualifiedName, depth + 1);
       return;
     }
     case "expression_statement": {
@@ -218,16 +224,43 @@ export interface ParseResult {
   symbols: Symbol[];
   /** True when the source contains a syntax error. */
   hasError: boolean;
+  /** True when the parse was cancelled for exceeding the time budget (symbols is empty). */
+  timedOut?: boolean;
 }
 
+/**
+ * Longest a single parse may run. Parsing is synchronous and blocks the whole
+ * stdio server, so a huge or generated file (a minified bundle, a multi-MB
+ * fixture) would otherwise stall every other tool call. Ordinary source files
+ * parse in milliseconds.
+ */
+export const PARSE_TIME_BUDGET_MS = 500;
+
 /** Parse source and extract its top-level and member symbols. */
-export async function extractSymbols(source: string, language: LanguageId): Promise<ParseResult> {
+export async function extractSymbols(
+  source: string,
+  language: LanguageId,
+  budgetMs: number = PARSE_TIME_BUDGET_MS,
+): Promise<ParseResult> {
   const parser = await parserFor(language);
-  const tree = parser.parse(source);
-  if (!tree) return { symbols: [], hasError: true };
-  const root = tree.rootNode;
-  const symbols = language === "python" ? extractPy(root, source) : extractTs(root, source);
-  return { symbols, hasError: root.hasError };
+  const started = performance.now();
+  const tree = parser.parse(source, null, {
+    progressCallback: () => performance.now() - started > budgetMs,
+  });
+  if (!tree) {
+    // A cancelled parse resumes on the next call unless reset, and the parser is shared.
+    parser.reset();
+    return { symbols: [], hasError: true, timedOut: true };
+  }
+  // Trees live in the WASM heap and are not garbage collected; symbols are plain
+  // objects, so the tree can be freed as soon as they are extracted.
+  try {
+    const root = tree.rootNode;
+    const symbols = language === "python" ? extractPy(root, source) : extractTs(root, source);
+    return { symbols, hasError: root.hasError };
+  } finally {
+    tree.delete();
+  }
 }
 
 /** Resolve a symbol by bare name or dotted qualified name. */

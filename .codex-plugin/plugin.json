@@ -19,6 +19,7 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
+  "hooks": "./.codex-plugin/hooks.json",
   "interface": {
     "displayName": "MOZCODE",
     "shortDescription": "Precise code context with fewer tokens.",

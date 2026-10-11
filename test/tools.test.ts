@@ -48,6 +48,36 @@ describe("code_outline", () => {
 });
 
 describe("code_read", () => {
+  it("returns a small unsupported file whole", async () => {
+    const p = join(tmpdir(), `mozcode-plain-${Date.now()}.md`);
+    await fs.writeFile(p, "# hello\n\nsome text\n");
+    const r = await codeRead(p, "note.md");
+    expect(r.degraded).toBe(true);
+    expect(r.text).toContain("(whole file, unsupported");
+    expect(r.text).toContain("   3  some text");
+    expect(r.text).not.toContain("truncated");
+  });
+
+  it("caps the plain read of a large unsupported file", async () => {
+    const p = join(tmpdir(), `mozcode-plain-big-${Date.now()}.log`);
+    await fs.writeFile(p, Array.from({ length: 5000 }, (_, i) => `log line ${i}`).join("\n"));
+    const r = await codeRead(p, "big.log");
+    expect(r.text).toContain("(first 2000 of 5000 lines");
+    expect(r.text).toContain("log line 1999");
+    expect(r.text).not.toContain("log line 2000");
+    expect(r.text).toContain("3000 more lines");
+    expect(r.meta.actualTokens).toBeLessThan(r.meta.baselineTokens);
+  });
+
+  it("caps a single huge line (minified files)", async () => {
+    const p = join(tmpdir(), `mozcode-plain-min-${Date.now()}.json`);
+    await fs.writeFile(p, JSON.stringify(Array.from({ length: 50_000 }, (_, i) => ({ i }))));
+    const r = await codeRead(p, "min.json");
+    expect(r.text.length).toBeLessThan(101_000);
+    expect(r.text).toContain("[line truncated]");
+    expect(r.text).toContain("(first 1 of 1 lines, truncated");
+  });
+
   it("returns a single symbol with context, not the whole file", async () => {
     const r = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add" });
     expect(r.degraded).toBe(false);
@@ -75,6 +105,43 @@ describe("code_read", () => {
 });
 
 describe("code_search", () => {
+  it("says when the file limit cut the search short, and applies path_glob before the limit", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "mozcode-search-limit-"));
+    try {
+      await fs.mkdir(join(root, "a"));
+      await fs.mkdir(join(root, "z"));
+      for (let i = 0; i < 5; i++) await fs.writeFile(join(root, "a", `f${i}.ts`), "export const other = 1;\n");
+      await fs.writeFile(join(root, "z", "target.ts"), "export const needle = 1;\n");
+      const capped = await codeSearch(root, "needle", undefined, 3);
+      expect(capped.text).toContain("No matches");
+      expect(capped.text).toContain("Only the first 3 source files were searched");
+      const scoped = await codeSearch(root, "needle", "z/**", 3);
+      expect(scoped.text).toContain("z/target.ts");
+      expect(scoped.text).not.toContain("file limit");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reads many files concurrently but keeps walk order and the match cap", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "mozcode-search-many-"));
+    try {
+      // 3 batches' worth of files, 4 hits each: 280 hits, capped at 200.
+      for (let i = 0; i < 70; i++) {
+        const name = `f${String(i).padStart(2, "0")}.ts`;
+        await fs.writeFile(join(root, name), Array.from({ length: 4 }, (_, k) => `export const needle${i}_${k} = ${k};`).join("\n"));
+      }
+      const first = await codeSearch(root, "needle");
+      expect(first.text).toContain("200+ matches");
+      expect(first.text).toContain("TRUNCATED");
+      // Deterministic: the same files win the cap every time.
+      expect((await codeSearch(root, "needle")).text).toBe(first.text);
+      expect((await codeSearch(root, "needle69_")).text).toContain("f69.ts");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("groups matches by actionable qualified symbol names", async () => {
     const r = await codeSearch(join(here, "fixtures"), "balance");
     expect(r.text).toContain("Account.constructor");
@@ -93,6 +160,18 @@ describe("code_search", () => {
   it("reports no matches cleanly", async () => {
     const r = await codeSearch(join(here, "fixtures"), "zzz_nonexistent_zzz");
     expect(r.text).toContain("No matches");
+  });
+});
+
+describe("code_read context_lines", () => {
+  it("treats string, negative and NaN values sanely", async () => {
+    const asString = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add", contextLines: "1" as unknown as number });
+    const asNumber = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add", contextLines: 1 });
+    expect(asString.text).toBe(asNumber.text);
+    const negative = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add", contextLines: -5 });
+    expect(negative.text).toContain("return a + b;");
+    const nan = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add", contextLines: Number.NaN });
+    expect(nan.text).toContain("return a + b;");
   });
 });
 
@@ -121,5 +200,66 @@ describe("code_edit", () => {
     expect(r.text).toContain("rejected");
     const after = await fs.readFile(tmp, "utf8");
     expect(after).toBe(before); // unchanged
+  });
+  it("accepts new_source that repeats the export modifier shown by code_read", async () => {
+    const r = await codeEdit(tmp, "sample.ts", "add", "export function add(a: number, b: number): number {\n  return b + a;\n}");
+    expect(r.degraded).toBe(false);
+    const content = await fs.readFile(tmp, "utf8");
+    expect(content).toContain("export function add(a: number, b: number): number {\n  return b + a;\n}");
+    expect(content).not.toContain("export export");
+  });
+
+  it("keeps the export modifier when new_source omits it", async () => {
+    const r = await codeEdit(tmp, "sample.ts", "multiply", "const multiply = (a: number, b: number): number => a * b;");
+    expect(r.degraded).toBe(false);
+    expect(await fs.readFile(tmp, "utf8")).toContain("export const multiply = (a: number, b: number): number => a * b;");
+  });
+
+  it("refuses an ambiguous bare name instead of editing the first match", async () => {
+    await fs.writeFile(tmp, "class A {\n  run(): number { return 1; }\n}\nclass B {\n  run(): number { return 2; }\n}\n");
+    const before = await fs.readFile(tmp, "utf8");
+    const r = await codeEdit(tmp, "x.ts", "run", "run(): number { return 3; }");
+    expect(r.degraded).toBe(true);
+    expect(r.text).toContain("ambiguous");
+    expect(r.text).toContain("A.run");
+    expect(r.text).toContain("B.run");
+    expect(await fs.readFile(tmp, "utf8")).toBe(before);
+    const ok = await codeEdit(tmp, "x.ts", "B.run", "run(): number { return 3; }");
+    expect(ok.degraded).toBe(false);
+    expect(await fs.readFile(tmp, "utf8")).toContain("return 1;");
+  });
+
+  it("warns when new_source no longer defines the edited symbol", async () => {
+    await fs.writeFile(tmp, "function add(a: number, b: number): number {\n  return a + b;\n}\nfunction keep(): void {}\n");
+    const bodyOnly = await codeEdit(tmp, "x.ts", "add", "a + b;");
+    expect(bodyOnly.degraded).toBe(false);
+    expect(bodyOnly.text).toContain('no longer defines "add" (new_source defines no symbol)');
+
+    await fs.copyFile(fixture("sample.ts"), tmp);
+    const renamed = await codeEdit(tmp, "sample.ts", "add", "function sum(a: number, b: number): number {\n  return a + b;\n}");
+    expect(renamed.text).toContain('no longer defines "add" (new_source defines sum)');
+
+    await fs.copyFile(fixture("sample.ts"), tmp);
+    const same = await codeEdit(tmp, "sample.ts", "add", "function add(a: number, b: number): number {\n  return b + a;\n}");
+    expect(same.text).not.toContain("Warning");
+  });
+
+  it("splices correctly after non-ASCII text (spans are UTF-16, not UTF-8 bytes)", async () => {
+    // web-tree-sitter reports UTF-16 code-unit offsets for JS strings; guard
+    // against a runtime upgrade that switches to byte offsets.
+    const src = "// café — 🎉 naïve\nexport function foo(): number {\n  return 1;\n}\n\nexport function bar(): number {\n  return 2;\n}\n";
+    await fs.writeFile(tmp, src);
+    const r = await codeEdit(tmp, "x.ts", "foo", "function foo(): number {\n  return 42;\n}");
+    expect(r.degraded).toBe(false);
+    expect(await fs.readFile(tmp, "utf8")).toBe(src.replace("return 1;", "return 42;"));
+  });
+
+  it("refuses to overwrite sibling declarators in one statement", async () => {
+    await fs.writeFile(tmp, "const a = 1, b = 2;\nexport const c = 3;\n");
+    const before = await fs.readFile(tmp, "utf8");
+    const r = await codeEdit(tmp, "x.ts", "a", "const a = 10;");
+    expect(r.degraded).toBe(true);
+    expect(r.text).toContain("shares its declaration statement with b");
+    expect(await fs.readFile(tmp, "utf8")).toBe(before);
   });
 });

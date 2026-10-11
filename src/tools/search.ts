@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { RE2JS } from "re2js";
 import { languageForPath } from "../ast/languages.js";
 import { type Symbol } from "../ast/engine.js";
 import { analyzeFile, readCachedSource } from "../ast/file-cache.js";
@@ -7,6 +8,8 @@ import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 
 const MAX_MATCHES = 200;
+/** Files read concurrently by code_search. */
+const READ_BATCH = 32;
 
 interface RawMatch {
   file: string;
@@ -15,11 +18,36 @@ interface RawMatch {
   offset: number; // char offset of the first match on the line
 }
 
-function buildRegex(query: string): RegExp {
+interface CompiledQuery {
+  rx: RE2JS;
+  /** Set when the query was searched as a literal string instead of a regex. */
+  note?: string;
+}
+
+/**
+ * Compile the model-supplied query with RE2 (linear-time matching), not V8's
+ * backtracking RegExp: a pattern such as `(a+)+$` would otherwise freeze the
+ * single-threaded stdio server for seconds or minutes per line. RE2 has no
+ * lookaround or backreferences, so those queries (like invalid ones) are
+ * searched as a literal string, and the result says so.
+ */
+export function compileQuery(query: string): CompiledQuery {
   try {
-    return new RegExp(query, "g");
+    return { rx: RE2JS.compile(query) };
   } catch {
-    return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+    let validJs = false;
+    try {
+      new RegExp(query);
+      validJs = true;
+    } catch {
+      // Not a regex in either dialect: a literal search is the intent.
+    }
+    return {
+      rx: RE2JS.compile(RE2JS.quote(query)),
+      note: validJs
+        ? "Lookaround, backreferences and \\u escapes are not supported (linear-time regex engine), so the query was searched as a literal string."
+        : undefined,
+    };
   }
 }
 
@@ -38,26 +66,40 @@ export async function codeSearch(
   root: string,
   query: string,
   pathGlob?: string,
+  fileLimit?: number,
 ): Promise<ToolResult> {
-  const rx = buildRegex(query);
-  const files = await listSourceFiles(root);
+  const { rx, note } = compileQuery(query);
+  const { files, truncated: filesTruncated } = await listSourceFiles(root, {
+    limit: fileLimit,
+    include: pathGlob
+      ? (file) => matchesGlob(path.isAbsolute(pathGlob) ? file : path.relative(root, file), pathGlob)
+      : undefined,
+  });
+  const fileNote = filesTruncated
+    ? `Only the first ${files.length} source files were searched (file limit reached); narrow path_glob to search the rest.`
+    : undefined;
   const matches: RawMatch[] = [];
 
-  for (const file of files) {
-    if (pathGlob && !matchesGlob(file, pathGlob)) continue;
-    let source: string;
-    try {
-      source = await readCachedSource(file);
-    } catch {
-      continue;
-    }
+  // Read files in parallel batches but scan them in walk order, so results and
+  // the MAX_MATCHES cut-off stay deterministic. One stat+read at a time made a
+  // cold search scale with per-file I/O latency times the file count.
+  let batch: Promise<string | null>[] = [];
+  const readBatch = (from: number) => {
+    batch = files.slice(from, from + READ_BATCH).map((f) => readCachedSource(f).catch(() => null));
+  };
+  readBatch(0);
+  for (let idx = 0; idx < files.length; idx++) {
+    const slot = idx % READ_BATCH;
+    if (slot === 0 && idx > 0) readBatch(idx);
+    const file = files[idx];
+    const source = await batch[slot];
+    if (source === null) continue;
     let offset = 0;
     const lines = source.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      rx.lastIndex = 0;
-      const match = rx.exec(lines[i]);
-      if (match) {
-        matches.push({ file, line: i + 1, text: lines[i].trim(), offset: offset + match.index });
+      const m = rx.matcher(lines[i]);
+      if (m.find()) {
+        matches.push({ file, line: i + 1, text: lines[i].trim(), offset: offset + m.start() });
         if (matches.length >= MAX_MATCHES) break;
       }
       offset += lines[i].length + 1; // + newline
@@ -72,7 +114,7 @@ export async function codeSearch(
   const baseline = estimateTokens(baselineText) || 1;
 
   if (matches.length === 0) {
-    const text = `No matches for /${query}/${pathGlob ? ` in ${pathGlob}` : ""}.`;
+    const text = `No matches for /${query}/${pathGlob ? ` in ${pathGlob}` : ""}.${note ? ` ${note}` : ""}${fileNote ? ` ${fileNote}` : ""}`;
     return { text, degraded: false, meta: makeMeta("code_search", undefined, baseline, estimateTokens(text)) };
   }
 
@@ -120,8 +162,11 @@ export async function codeSearch(
     blocks.push(`${rel}:\n${parts.join("\n")}`);
   }
 
-  const header = `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
-  const text = `${header}\n${blocks.join("\n")}`;
+  const truncated = matches.length >= MAX_MATCHES;
+  const header = truncated
+    ? `${MAX_MATCHES}+ matches for /${query}/ (TRUNCATED at ${MAX_MATCHES}; results are incomplete, narrow the query or path_glob), grouped by symbol:`
+    : `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
+  const text = `${header}\n${note ? `${note}\n` : ""}${fileNote ? `${fileNote}\n` : ""}${blocks.join("\n")}`;
   return {
     text,
     degraded: false,

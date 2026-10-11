@@ -20,7 +20,13 @@ export function mozcodeHome(): string {
   return process.env.MOZCODE_HOME || path.join(os.homedir(), ".mozcode");
 }
 
-function meteringDir(): string {
+// The ledger, session pointers and dashboard list project paths and file
+// names, so keep them private to the user (ignored on Windows). Modes apply
+// only when a directory or file is created.
+export const PRIVATE_DIR_MODE = 0o700;
+export const PRIVATE_FILE_MODE = 0o600;
+
+export function meteringDir(): string {
   return path.join(mozcodeHome(), "metering");
 }
 
@@ -37,7 +43,7 @@ export async function record(
   meta: SavingsMeta,
 ): Promise<void> {
   try {
-    await fs.mkdir(meteringDir(), { recursive: true });
+    await fs.mkdir(meteringDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
     const entry: MeteringEntry = {
       ts: new Date().toISOString(),
       session,
@@ -48,7 +54,7 @@ export async function record(
       actualTokens: meta.actualTokens,
       savedTokens: meta.savedTokens,
     };
-    await fs.appendFile(projectFile(project), JSON.stringify(entry) + "\n", "utf8");
+    await fs.appendFile(projectFile(project), JSON.stringify(entry) + "\n", { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   } catch {
     // Metering is best-effort; a failure here must not break a tool call.
   }
@@ -70,8 +76,8 @@ function sessionPointerFile(project: string): string {
  */
 export async function writeCurrentSession(project: string, session: string): Promise<void> {
   try {
-    await fs.mkdir(sessionsDir(), { recursive: true });
-    await fs.writeFile(sessionPointerFile(project), session, "utf8");
+    await fs.mkdir(sessionsDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
+    await fs.writeFile(sessionPointerFile(project), session, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   } catch {
     // Pointer is a convenience; the statusline falls back to the latest entry.
   }
@@ -87,7 +93,26 @@ export async function readCurrentSession(project: string): Promise<string | unde
   }
 }
 
-/** Load all metering entries across every project. */
+export function isMeteringEntry(v: unknown): v is MeteringEntry {
+  if (!v || typeof v !== "object") return false;
+  const e = v as Record<string, unknown>;
+  return (
+    typeof e.ts === "string" &&
+    typeof e.session === "string" &&
+    typeof e.project === "string" &&
+    typeof e.tool === "string" &&
+    (e.path === undefined || typeof e.path === "string") &&
+    Number.isFinite(e.baselineTokens) &&
+    Number.isFinite(e.actualTokens) &&
+    Number.isFinite(e.savedTokens)
+  );
+}
+
+/**
+ * Load all metering entries across every project. Lines that are not valid
+ * entries (truncated writes, "null", hand-edited rows) are skipped so one bad
+ * line cannot make summarize() throw or turn every total into NaN.
+ */
 export async function loadEntries(): Promise<MeteringEntry[]> {
   const dir = meteringDir();
   let files: string[];
@@ -102,7 +127,8 @@ export async function loadEntries(): Promise<MeteringEntry[]> {
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
-        out.push(JSON.parse(line) as MeteringEntry);
+        const parsed: unknown = JSON.parse(line);
+        if (isMeteringEntry(parsed)) out.push(parsed);
       } catch {
         /* skip malformed line */
       }
@@ -118,14 +144,15 @@ export interface Summary {
   totalSaved: number;
   avgReductionPct: number;
   projects: number;
-  byTool: { tool: string; calls: number; saved: number }[];
+  /** `savingCalls` counts calls that actually saved tokens (not failed or empty ones). */
+  byTool: { tool: string; calls: number; savingCalls: number; saved: number }[];
   byDay: { day: string; saved: number }[];
   byFile: { path: string; calls: number; saved: number }[];
   bySession: { session: string; calls: number; baseline: number; actual: number; saved: number }[];
 }
 
 export function summarize(entries: MeteringEntry[], topFiles = 15): Summary {
-  const byTool = new Map<string, { calls: number; saved: number }>();
+  const byTool = new Map<string, { calls: number; savingCalls: number; saved: number }>();
   const byDay = new Map<string, number>();
   const byFile = new Map<string, { calls: number; saved: number }>();
   const bySession = new Map<string, { calls: number; baseline: number; actual: number; saved: number }>();
@@ -141,8 +168,9 @@ export function summarize(entries: MeteringEntry[], topFiles = 15): Summary {
     totalSaved += e.savedTokens;
     projects.add(e.project);
 
-    const t = byTool.get(e.tool) ?? { calls: 0, saved: 0 };
+    const t = byTool.get(e.tool) ?? { calls: 0, savingCalls: 0, saved: 0 };
     t.calls += 1;
+    if (e.savedTokens > 0) t.savingCalls += 1;
     t.saved += e.savedTokens;
     byTool.set(e.tool, t);
 

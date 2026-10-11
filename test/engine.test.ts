@@ -49,6 +49,15 @@ describe("TypeScript extraction", () => {
   });
 });
 
+describe("TypeScript type aliases", () => {
+  it("keeps generic defaults in the signature", async () => {
+    const src = "export type Box<T = string, U extends object = {}> = { value: T; meta: U };\ntype Id = string;\n";
+    const { symbols } = await extractSymbols(src, "typescript");
+    expect(symbols.find((s) => s.name === "Box")?.signature).toBe("type Box<T = string, U extends object = {}>");
+    expect(symbols.find((s) => s.name === "Id")?.signature).toBe("type Id");
+  });
+});
+
 describe("Python extraction", () => {
   const src = read("sample.py");
 
@@ -73,9 +82,55 @@ describe("Python extraction", () => {
   });
 });
 
+describe("nested Python classes", () => {
+  it("qualifies nested members with the full class path", async () => {
+    const src = [
+      "class Outer:",
+      "    class Meta:",
+      "        def run(self):",
+      "            return 1",
+      "",
+      "class Meta:",
+      "    def run(self):",
+      "        return 2",
+      "",
+    ].join("\n");
+    const { symbols } = await extractSymbols(src, "python");
+    const names = symbols.map((s) => s.qualifiedName);
+    expect(names).toEqual(["Outer", "Outer.Meta", "Outer.Meta.run", "Meta", "Meta.run"]);
+    expect(resolveSymbol(symbols, "Meta.run")?.startLine).toBe(7);
+    expect(resolveSymbol(symbols, "Outer.Meta.run")?.startLine).toBe(3);
+  });
+});
+
 describe("error handling", () => {
   it("flags syntax errors without throwing", async () => {
     const { hasError } = await extractSymbols("function broken( {", "typescript");
     expect(hasError).toBe(true);
+  });
+});
+
+describe("parse time budget", () => {
+  // A large generated file, so the parse cannot finish inside a 1 ms budget.
+  const big = Array.from({ length: 20_000 }, (_, i) => `export function f${i}(a: number): number { return a + ${i}; }`).join("\n");
+
+  it("cancels a parse that runs past the budget", async () => {
+    const r = await extractSymbols(big, "typescript", 1);
+    expect(r.timedOut).toBe(true);
+    expect(r.symbols).toEqual([]);
+  });
+
+  it("leaves the shared parser usable for the next file after a cancel", async () => {
+    await extractSymbols(big, "typescript", 1);
+    const { symbols, hasError, timedOut } = await extractSymbols("export function ok() { return 1; }", "typescript");
+    expect(timedOut).toBeUndefined();
+    expect(hasError).toBe(false);
+    expect(symbols.map((s) => s.name)).toEqual(["ok"]);
+  });
+
+  it("parses an ordinary file within the default budget", async () => {
+    const r = await extractSymbols(big.split("\n").slice(0, 2_000).join("\n"), "typescript");
+    expect(r.timedOut).toBeUndefined();
+    expect(r.symbols).toHaveLength(2_000);
   });
 });

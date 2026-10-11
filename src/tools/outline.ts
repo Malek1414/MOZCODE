@@ -1,5 +1,5 @@
 import { type Symbol } from "../ast/engine.js";
-import { analyzeFile } from "../ast/file-cache.js";
+import { analyzeFile, sourceTokensOf } from "../ast/file-cache.js";
 import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 
@@ -15,14 +15,16 @@ export function renderOutline(symbols: Symbol[], relPath: string): string {
 }
 
 export async function codeOutline(absPath: string, relPath: string): Promise<ToolResult> {
-  const { source, language, symbols, hasError } = await analyzeFile(absPath);
-  const baseline = estimateTokens(source);
+  const analysis = await analyzeFile(absPath);
+  const { source, language, symbols, hasError, timedOut } = analysis;
+  const baseline = sourceTokensOf(analysis);
 
-  if (!language) {
-    // Unsupported language: outline isn't possible; hand back a bounded head.
+  if (!language || timedOut) {
+    // Unsupported language or too large to parse in time: hand back a bounded head.
     const head = source.split("\n").slice(0, 40).join("\n");
+    const why = language ? "file too large to parse for an AST outline" : "unsupported language for AST outline";
     return {
-      text: `${relPath}: unsupported language for AST outline. First 40 lines:\n${head}`,
+      text: `${relPath}: ${why}. First 40 lines:\n${head}`,
       degraded: true,
       meta: makeMeta("code_outline", relPath, baseline, estimateTokens(head)),
     };
