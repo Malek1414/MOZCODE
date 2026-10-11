@@ -48,6 +48,36 @@ describe("code_outline", () => {
 });
 
 describe("code_read", () => {
+  it("returns a small unsupported file whole", async () => {
+    const p = join(tmpdir(), `mozcode-plain-${Date.now()}.md`);
+    await fs.writeFile(p, "# hello\n\nsome text\n");
+    const r = await codeRead(p, "note.md");
+    expect(r.degraded).toBe(true);
+    expect(r.text).toContain("(whole file, unsupported");
+    expect(r.text).toContain("   3  some text");
+    expect(r.text).not.toContain("truncated");
+  });
+
+  it("caps the plain read of a large unsupported file", async () => {
+    const p = join(tmpdir(), `mozcode-plain-big-${Date.now()}.log`);
+    await fs.writeFile(p, Array.from({ length: 5000 }, (_, i) => `log line ${i}`).join("\n"));
+    const r = await codeRead(p, "big.log");
+    expect(r.text).toContain("(first 2000 of 5000 lines");
+    expect(r.text).toContain("log line 1999");
+    expect(r.text).not.toContain("log line 2000");
+    expect(r.text).toContain("3000 more lines");
+    expect(r.meta.actualTokens).toBeLessThan(r.meta.baselineTokens);
+  });
+
+  it("caps a single huge line (minified files)", async () => {
+    const p = join(tmpdir(), `mozcode-plain-min-${Date.now()}.json`);
+    await fs.writeFile(p, JSON.stringify(Array.from({ length: 50_000 }, (_, i) => ({ i }))));
+    const r = await codeRead(p, "min.json");
+    expect(r.text.length).toBeLessThan(101_000);
+    expect(r.text).toContain("[line truncated]");
+    expect(r.text).toContain("(first 1 of 1 lines, truncated");
+  });
+
   it("returns a single symbol with context, not the whole file", async () => {
     const r = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add" });
     expect(r.degraded).toBe(false);

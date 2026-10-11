@@ -26595,6 +26595,30 @@ function withContext(source, startLine, endLine, context) {
   const to = Math.min(lines.length, endLine + context);
   return lines.slice(from, to).map((l, i2) => `${String(from + i2 + 1).padStart(4)}  ${l}`).join("\n");
 }
+var PLAIN_READ_MAX_LINES = 2e3;
+var PLAIN_READ_MAX_CHARS = 1e5;
+function numberedHead(source) {
+  const lines = source.split("\n");
+  const out2 = [];
+  let chars = 0;
+  let lineCut = false;
+  for (let i2 = 0; i2 < lines.length && i2 < PLAIN_READ_MAX_LINES; i2++) {
+    let line = `${String(i2 + 1).padStart(4)}  ${lines[i2]}`;
+    if (chars + line.length > PLAIN_READ_MAX_CHARS) {
+      if (out2.length > 0) break;
+      line = line.slice(0, PLAIN_READ_MAX_CHARS) + " [line truncated]";
+      lineCut = true;
+    }
+    out2.push(line);
+    chars += line.length + 1;
+  }
+  return {
+    text: out2.join("\n"),
+    shownLines: out2.length,
+    totalLines: lines.length,
+    complete: !lineCut && out2.length === lines.length
+  };
+}
 var DEFAULT_CONTEXT = 3;
 var MAX_CONTEXT = 200;
 function contextLinesOf(raw) {
@@ -26607,11 +26631,14 @@ async function codeRead(absPath, relPath, opts = {}) {
   const baseline = estimateTokens(source);
   const context = contextLinesOf(opts.contextLines);
   if (!language || timedOut) {
-    const numbered = source.split("\n").map((l, i2) => `${String(i2 + 1).padStart(4)}  ${l}`).join("\n");
+    const { text: numbered, shownLines, totalLines, complete } = numberedHead(source);
     const why = language ? "too large to parse for symbol extraction" : "unsupported for symbol extraction";
+    const label = complete ? "whole file" : `first ${shownLines} of ${totalLines} lines, truncated`;
+    const more = complete ? "" : `
+[truncated${totalLines > shownLines ? `: ${totalLines - shownLines} more lines` : ""}; use the built-in Read with an offset for the rest]`;
     return {
-      text: `${relPath} (whole file, ${why}):
-${numbered}`,
+      text: `${relPath} (${label}, ${why}):
+${numbered}${more}`,
       degraded: true,
       meta: makeMeta("code_read", relPath, baseline, estimateTokens(numbered))
     };
