@@ -140,4 +140,14 @@ describe("project resolution guard", () => {
     expect(result.isError).toBe(false);
     expect(result.text).toMatch(/server\.ts/);
   }, 30_000);
+  it("flags a code_edit that did not write the file as an error", async () => {
+    const result = await callTool(
+      root,
+      "code_edit",
+      { path: "test/fixtures/sample.ts", symbol: "noSuchSymbol", new_source: "function noSuchSymbol() {}" },
+      { MOZCODE_PROJECT: root },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/not found/);
+  }, 30_000);
 });

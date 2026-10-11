@@ -253,8 +253,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "code_edit": {
         const { abs, rel } = resolvePaths(String(args.path));
-        const r = await meter(await codeEdit(abs, rel, String(args.symbol), String(args.new_source)));
-        return textResult(r.text, r.degraded && r.text.includes("rejected"));
+        // Every degraded code_edit result (unsupported language, symbol not
+        // found, rejected) means the file was NOT written: report it as a tool
+        // error and don't meter it as an avoided round-trip.
+        const r = await codeEdit(abs, rel, String(args.symbol), String(args.new_source));
+        if (r.degraded) return textResult(r.text, true);
+        await meter(r);
+        return textResult(r.text);
       }
       case "db_schema": {
         const r = await meter(await dbSchema(PROJECT, {

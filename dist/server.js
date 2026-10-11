@@ -27608,8 +27608,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "code_edit": {
         const { abs, rel } = resolvePaths(String(args2.path));
-        const r = await meter(await codeEdit(abs, rel, String(args2.symbol), String(args2.new_source)));
-        return textResult(r.text, r.degraded && r.text.includes("rejected"));
+        const r = await codeEdit(abs, rel, String(args2.symbol), String(args2.new_source));
+        if (r.degraded) return textResult(r.text, true);
+        await meter(r);
+        return textResult(r.text);
       }
       case "db_schema": {
         const r = await meter(await dbSchema(PROJECT, {
