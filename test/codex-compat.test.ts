@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -156,4 +156,61 @@ describe("project resolution guard", () => {
     expect(result.isError).toBe(true);
     expect(result.text).toMatch(/not found/);
   }, 30_000);
+
+  describe("code_edit stays inside the project", () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "mozcode-contain-"));
+    const project = join(sandbox, "proj");
+    const outsideFile = join(sandbox, "outside.ts");
+    const original = "export function target() {\n  return 1;\n}\n";
+    const edit = { symbol: "target", new_source: "export function target() {\n  return 2;\n}" };
+    mkdirSync(project);
+    // A sibling whose name starts with the project's must not count as inside.
+    mkdirSync(join(sandbox, "proj-other"));
+    afterAll(() => rmSync(sandbox, { recursive: true, force: true }));
+
+    const reset = () => {
+      writeFileSync(outsideFile, original);
+      writeFileSync(join(sandbox, "proj-other", "x.ts"), original);
+      writeFileSync(join(project, "inside.ts"), original);
+    };
+
+    it("refuses ../, absolute, sibling-prefix and symlinked paths that leave the project", async () => {
+      reset();
+      symlinkSync(sandbox, join(project, "escape"));
+      for (const p of ["../outside.ts", outsideFile, join(sandbox, "proj-other", "x.ts"), "escape/outside.ts"]) {
+        const result = await callTool(project, "code_edit", { path: p, ...edit }, { MOZCODE_PROJECT: project });
+        expect(result.isError, p).toBe(true);
+        expect(result.text, p).toMatch(/outside the project/);
+      }
+      expect(readFileSync(outsideFile, "utf8")).toBe(original);
+      expect(readFileSync(join(sandbox, "proj-other", "x.ts"), "utf8")).toBe(original);
+    }, 60_000);
+
+    it("still edits files inside the project", async () => {
+      reset();
+      const result = await callTool(project, "code_edit", { path: "inside.ts", ...edit }, { MOZCODE_PROJECT: project });
+      expect(result.isError).toBe(false);
+      expect(readFileSync(join(project, "inside.ts"), "utf8")).toContain("return 2;");
+    }, 30_000);
+
+    it("refuses absolute-path edits while the project is UNRESOLVED", async () => {
+      reset();
+      const result = await callTool(root, "code_edit", { path: outsideFile, ...edit });
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(/UNRESOLVED/);
+      expect(readFileSync(outsideFile, "utf8")).toBe(original);
+    }, 30_000);
+
+    it("allows outside edits only with the explicit opt-out", async () => {
+      reset();
+      const result = await callTool(
+        project,
+        "code_edit",
+        { path: outsideFile, ...edit },
+        { MOZCODE_PROJECT: project, MOZCODE_ALLOW_EDIT_OUTSIDE_PROJECT: "1" },
+      );
+      expect(result.isError).toBe(false);
+      expect(readFileSync(outsideFile, "utf8")).toContain("return 2;");
+    }, 30_000);
+  });
 });

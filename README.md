@@ -43,6 +43,11 @@ Anything else falls back to a plain read.
 `DATABASE_URL` (or another environment variable named via `connection_env`).
 Credentials never need to appear in a model-visible tool argument.
 
+**Edits stay in the project:** `code_edit` refuses paths outside the project
+root (including `../` and symlinks that leave it); use the host's own Edit tool
+there. Set `MOZCODE_ALLOW_EDIT_OUTSIDE_PROJECT=1` in the server environment to
+lift this. The read-only tools accept any path.
+
 ## Install (local, no account)
 
 ```bash
