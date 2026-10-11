@@ -517,6 +517,11 @@ function renderObject(object: DbObject): string {
   return `${object.kind === "view" ? "view " : ""}${qualifiedName(object)}(${columns.join(", ")})${indexes}`;
 }
 
+/** Characters of rendered schema objects per db_schema result (roughly 12k tokens). */
+const SCHEMA_TEXT_BUDGET = 50_000;
+/** Characters spent naming the objects that did not fit. */
+const OMITTED_NAMES_BUDGET = 8_000;
+
 function renderSnapshot(snapshot: DbSnapshot, query?: string): { text: string; objects: DbObject[] } {
   const needle = query?.trim().toLowerCase();
   const objects = needle
@@ -528,7 +533,35 @@ function renderSnapshot(snapshot: DbSnapshot, query?: string): { text: string; o
   const scope = needle ? `; ${objects.length} objects match "${query}"` : "";
   const header = `${snapshot.source} — ${snapshot.dialect} schema: ${tableCount} tables, ${viewCount} views, ${columnCount} columns${scope}`;
   if (objects.length === 0) return { text: `${header}\n(no matching schema objects)`, objects };
-  return { text: `${header}\n${objects.map(renderObject).join("\n")}`, objects };
+
+  // A schema with thousands of tables would otherwise come back in one result
+  // far larger than the context it is meant to save. Render whole objects up
+  // to the budget, then name the rest so the model can narrow with `query`.
+  const lines: string[] = [];
+  let chars = 0;
+  for (const object of objects) {
+    const line = renderObject(object);
+    if (lines.length > 0 && chars + line.length > SCHEMA_TEXT_BUDGET) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  const omitted = objects.slice(lines.length);
+  if (omitted.length > 0) {
+    const names: string[] = [];
+    let nameChars = 0;
+    for (const object of omitted) {
+      const name = qualifiedName(object);
+      if (nameChars + name.length > OMITTED_NAMES_BUDGET) break;
+      names.push(name);
+      nameChars += name.length + 2;
+    }
+    const rest = omitted.length - names.length;
+    lines.push(
+      `… ${omitted.length} more objects not shown (output budget); pass query to filter by table, column or index name. ` +
+        `Not shown: ${names.join(", ")}${rest > 0 ? `, and ${rest} more` : ""}`,
+    );
+  }
+  return { text: `${header}\n${lines.join("\n")}`, objects };
 }
 
 /**

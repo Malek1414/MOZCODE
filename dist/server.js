@@ -33678,6 +33678,8 @@ function renderObject(object3) {
   const indexes = object3.indexes.length ? ` idx[${object3.indexes.map((index) => `${index.unique ? "U:" : ""}${index.name}(${index.columns.join(",")})`).join("; ")}]` : "";
   return `${object3.kind === "view" ? "view " : ""}${qualifiedName(object3)}(${columns.join(", ")})${indexes}`;
 }
+var SCHEMA_TEXT_BUDGET = 5e4;
+var OMITTED_NAMES_BUDGET = 8e3;
 function renderSnapshot(snapshot, query) {
   const needle = query?.trim().toLowerCase();
   const objects = needle ? snapshot.objects.filter((object3) => objectSearchText(object3).includes(needle)) : snapshot.objects;
@@ -33688,8 +33690,31 @@ function renderSnapshot(snapshot, query) {
   const header = `${snapshot.source} \u2014 ${snapshot.dialect} schema: ${tableCount} tables, ${viewCount} views, ${columnCount} columns${scope}`;
   if (objects.length === 0) return { text: `${header}
 (no matching schema objects)`, objects };
+  const lines = [];
+  let chars = 0;
+  for (const object3 of objects) {
+    const line = renderObject(object3);
+    if (lines.length > 0 && chars + line.length > SCHEMA_TEXT_BUDGET) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  const omitted = objects.slice(lines.length);
+  if (omitted.length > 0) {
+    const names = [];
+    let nameChars = 0;
+    for (const object3 of omitted) {
+      const name2 = qualifiedName(object3);
+      if (nameChars + name2.length > OMITTED_NAMES_BUDGET) break;
+      names.push(name2);
+      nameChars += name2.length + 2;
+    }
+    const rest = omitted.length - names.length;
+    lines.push(
+      `\u2026 ${omitted.length} more objects not shown (output budget); pass query to filter by table, column or index name. Not shown: ${names.join(", ")}${rest > 0 ? `, and ${rest} more` : ""}`
+    );
+  }
   return { text: `${header}
-${objects.map(renderObject).join("\n")}`, objects };
+${lines.join("\n")}`, objects };
 }
 async function dbSchema(projectRoot, opts = {}) {
   let snapshot;

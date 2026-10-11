@@ -103,6 +103,37 @@ describe("db_schema", () => {
   });
 });
 
+describe("db_schema output budget", () => {
+  it("caps a very large schema and names what it left out", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "mozcode-db-big-"));
+    try {
+      const file = join(dir, "big.sqlite");
+      const db = new DatabaseSync(file);
+      const cols = Array.from({ length: 8 }, (_, i) => `column_number_${i} TEXT NOT NULL`).join(", ");
+      db.exec("BEGIN");
+      for (let t = 0; t < 1500; t++) db.exec(`CREATE TABLE table_${String(t).padStart(4, "0")} (id INTEGER PRIMARY KEY, ${cols})`);
+      db.exec("COMMIT");
+      db.close();
+      clearDbSchemaCache();
+
+      const r = await dbSchema(dir, { path: "big.sqlite" });
+      expect(r.text).toContain("1500 tables");
+      expect(r.text.length).toBeLessThan(60_000);
+      expect(r.text).toContain("more objects not shown");
+      expect(r.text).toContain("table_0000(id INTEGER PK");
+      expect(r.text).toMatch(/Not shown: table_\d{4}, /);
+      expect(r.meta.actualTokens).toBeLessThan(r.meta.baselineTokens);
+
+      // A query narrows the result back under the budget, in full.
+      const one = await dbSchema(dir, { path: "big.sqlite", query: "table_1499" });
+      expect(one.text).toContain("table_1499(id INTEGER PK");
+      expect(one.text).not.toContain("not shown");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // Opt-in: point MOZCODE_TEST_POSTGRES_URL at a disposable database to exercise
 // the real pg path (read-only transaction with server-side timeouts).
 describe.skipIf(!process.env.MOZCODE_TEST_POSTGRES_URL)("db_schema against PostgreSQL", () => {
