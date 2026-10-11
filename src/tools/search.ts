@@ -66,11 +66,18 @@ export async function codeSearch(
   root: string,
   query: string,
   pathGlob?: string,
+  fileLimit?: number,
 ): Promise<ToolResult> {
   const { rx, note } = compileQuery(query);
-  const files = (await listSourceFiles(root)).filter(
-    (file) => !pathGlob || matchesGlob(path.isAbsolute(pathGlob) ? file : path.relative(root, file), pathGlob),
-  );
+  const { files, truncated: filesTruncated } = await listSourceFiles(root, {
+    limit: fileLimit,
+    include: pathGlob
+      ? (file) => matchesGlob(path.isAbsolute(pathGlob) ? file : path.relative(root, file), pathGlob)
+      : undefined,
+  });
+  const fileNote = filesTruncated
+    ? `Only the first ${files.length} source files were searched (file limit reached); narrow path_glob to search the rest.`
+    : undefined;
   const matches: RawMatch[] = [];
 
   // Read files in parallel batches but scan them in walk order, so results and
@@ -107,7 +114,7 @@ export async function codeSearch(
   const baseline = estimateTokens(baselineText) || 1;
 
   if (matches.length === 0) {
-    const text = `No matches for /${query}/${pathGlob ? ` in ${pathGlob}` : ""}.${note ? ` ${note}` : ""}`;
+    const text = `No matches for /${query}/${pathGlob ? ` in ${pathGlob}` : ""}.${note ? ` ${note}` : ""}${fileNote ? ` ${fileNote}` : ""}`;
     return { text, degraded: false, meta: makeMeta("code_search", undefined, baseline, estimateTokens(text)) };
   }
 
@@ -159,7 +166,7 @@ export async function codeSearch(
   const header = truncated
     ? `${MAX_MATCHES}+ matches for /${query}/ (TRUNCATED at ${MAX_MATCHES}; results are incomplete, narrow the query or path_glob), grouped by symbol:`
     : `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
-  const text = `${header}\n${note ? `${note}\n` : ""}${blocks.join("\n")}`;
+  const text = `${header}\n${note ? `${note}\n` : ""}${fileNote ? `${fileNote}\n` : ""}${blocks.join("\n")}`;
   return {
     text,
     degraded: false,

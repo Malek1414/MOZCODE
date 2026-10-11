@@ -9,30 +9,51 @@ const CODE_EXTENSIONS = new Set([
   ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".py", ".pyi",
 ]);
 
-/** Recursively list candidate source files under root, skipping vendored/output dirs. */
-export async function listSourceFiles(root: string, limit = 5000): Promise<string[]> {
+export interface SourceFileList {
+  files: string[];
+  /** True when the walk stopped at the limit and more matching files exist. */
+  truncated: boolean;
+}
+
+/**
+ * Recursively list candidate source files under root, skipping vendored/output
+ * dirs. `include` filters files before they count toward `limit`, so a narrow
+ * path_glob in a large repo is not cut off by unrelated files walked first.
+ */
+export async function listSourceFiles(
+  root: string,
+  opts: { limit?: number; include?: (file: string) => boolean } = {},
+): Promise<SourceFileList> {
+  const limit = opts.limit ?? 5000;
   const out: string[] = [];
+  let truncated = false;
   async function walk(dir: string): Promise<void> {
-    if (out.length >= limit) return;
     let entries: import("node:fs").Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
+    // readdir order is filesystem-dependent; sort so the limit cuts the same files everywhere.
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of entries) {
-      if (out.length >= limit) return;
+      if (truncated) return;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (IGNORED_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
         await walk(full);
       } else if (entry.isFile() && CODE_EXTENSIONS.has(path.extname(entry.name))) {
+        if (opts.include && !opts.include(full)) continue;
+        if (out.length >= limit) {
+          truncated = true;
+          return;
+        }
         out.push(full);
       }
     }
   }
   await walk(root);
-  return out;
+  return { files: out, truncated };
 }
 
 /** Translate a glob ("*", "**", "?") into an anchored regex over "/"-separated paths. */

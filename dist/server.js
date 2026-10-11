@@ -33007,29 +33007,36 @@ var CODE_EXTENSIONS = /* @__PURE__ */ new Set([
   ".py",
   ".pyi"
 ]);
-async function listSourceFiles(root, limit = 5e3) {
+async function listSourceFiles(root, opts = {}) {
+  const limit = opts.limit ?? 5e3;
   const out2 = [];
+  let truncated = false;
   async function walk(dir) {
-    if (out2.length >= limit) return;
     let entries;
     try {
       entries = await fs4.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
+    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     for (const entry of entries) {
-      if (out2.length >= limit) return;
+      if (truncated) return;
       const full = path2.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (IGNORED_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
         await walk(full);
       } else if (entry.isFile() && CODE_EXTENSIONS.has(path2.extname(entry.name))) {
+        if (opts.include && !opts.include(full)) continue;
+        if (out2.length >= limit) {
+          truncated = true;
+          return;
+        }
         out2.push(full);
       }
     }
   }
   await walk(root);
-  return out2;
+  return { files: out2, truncated };
 }
 function globToRegex(glob) {
   let rx = "";
@@ -33095,11 +33102,13 @@ function enclosing(symbols, offset) {
   }
   return best;
 }
-async function codeSearch(root, query, pathGlob) {
+async function codeSearch(root, query, pathGlob, fileLimit) {
   const { rx, note } = compileQuery(query);
-  const files2 = (await listSourceFiles(root)).filter(
-    (file) => !pathGlob || matchesGlob(path3.isAbsolute(pathGlob) ? file : path3.relative(root, file), pathGlob)
-  );
+  const { files: files2, truncated: filesTruncated } = await listSourceFiles(root, {
+    limit: fileLimit,
+    include: pathGlob ? (file) => matchesGlob(path3.isAbsolute(pathGlob) ? file : path3.relative(root, file), pathGlob) : void 0
+  });
+  const fileNote = filesTruncated ? `Only the first ${files2.length} source files were searched (file limit reached); narrow path_glob to search the rest.` : void 0;
   const matches = [];
   let batch = [];
   const readBatch = (from) => {
@@ -33127,7 +33136,7 @@ async function codeSearch(root, query, pathGlob) {
   const baselineText = matches.map((m) => `${path3.relative(root, m.file)}:${m.line}: ${m.text}`).join("\n");
   const baseline = estimateTokens(baselineText) || 1;
   if (matches.length === 0) {
-    const text2 = `No matches for /${query}/${pathGlob ? ` in ${pathGlob}` : ""}.${note ? ` ${note}` : ""}`;
+    const text2 = `No matches for /${query}/${pathGlob ? ` in ${pathGlob}` : ""}.${note ? ` ${note}` : ""}${fileNote ? ` ${fileNote}` : ""}`;
     return { text: text2, degraded: false, meta: makeMeta("code_search", void 0, baseline, estimateTokens(text2)) };
   }
   const byFile = /* @__PURE__ */ new Map();
@@ -33176,6 +33185,7 @@ ${parts2.join("\n")}`);
   const header = truncated ? `${MAX_MATCHES}+ matches for /${query}/ (TRUNCATED at ${MAX_MATCHES}; results are incomplete, narrow the query or path_glob), grouped by symbol:` : `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
   const text = `${header}
 ${note ? `${note}
+` : ""}${fileNote ? `${fileNote}
 ` : ""}${blocks.join("\n")}`;
   return {
     text,

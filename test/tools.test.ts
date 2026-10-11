@@ -105,6 +105,24 @@ describe("code_read", () => {
 });
 
 describe("code_search", () => {
+  it("says when the file limit cut the search short, and applies path_glob before the limit", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "mozcode-search-limit-"));
+    try {
+      await fs.mkdir(join(root, "a"));
+      await fs.mkdir(join(root, "z"));
+      for (let i = 0; i < 5; i++) await fs.writeFile(join(root, "a", `f${i}.ts`), "export const other = 1;\n");
+      await fs.writeFile(join(root, "z", "target.ts"), "export const needle = 1;\n");
+      const capped = await codeSearch(root, "needle", undefined, 3);
+      expect(capped.text).toContain("No matches");
+      expect(capped.text).toContain("Only the first 3 source files were searched");
+      const scoped = await codeSearch(root, "needle", "z/**", 3);
+      expect(scoped.text).toContain("z/target.ts");
+      expect(scoped.text).not.toContain("file limit");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("reads many files concurrently but keeps walk order and the match cap", async () => {
     const root = await fs.mkdtemp(join(tmpdir(), "mozcode-search-many-"));
     try {
