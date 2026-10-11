@@ -25168,10 +25168,17 @@ function extractPy(root, source) {
   for (const child of root.namedChildren) if (child) handlePyNode(child, source, out2, null, 0);
   return out2;
 }
-async function extractSymbols(source, language) {
+var PARSE_TIME_BUDGET_MS = 500;
+async function extractSymbols(source, language, budgetMs = PARSE_TIME_BUDGET_MS) {
   const parser = await parserFor(language);
-  const tree = parser.parse(source);
-  if (!tree) return { symbols: [], hasError: true };
+  const started = performance.now();
+  const tree = parser.parse(source, null, {
+    progressCallback: () => performance.now() - started > budgetMs
+  });
+  if (!tree) {
+    parser.reset();
+    return { symbols: [], hasError: true, timedOut: true };
+  }
   try {
     const root = tree.rootNode;
     const symbols = language === "python" ? extractPy(root, source) : extractTs(root, source);
@@ -26560,12 +26567,13 @@ function renderOutline(symbols, relPath) {
 ${lines.join("\n")}`;
 }
 async function codeOutline(absPath, relPath) {
-  const { source, language, symbols, hasError } = await analyzeFile(absPath);
+  const { source, language, symbols, hasError, timedOut } = await analyzeFile(absPath);
   const baseline = estimateTokens(source);
-  if (!language) {
+  if (!language || timedOut) {
     const head = source.split("\n").slice(0, 40).join("\n");
+    const why = language ? "file too large to parse for an AST outline" : "unsupported language for AST outline";
     return {
-      text: `${relPath}: unsupported language for AST outline. First 40 lines:
+      text: `${relPath}: ${why}. First 40 lines:
 ${head}`,
       degraded: true,
       meta: makeMeta("code_outline", relPath, baseline, estimateTokens(head))
@@ -26595,13 +26603,14 @@ function contextLinesOf(raw) {
   return Math.min(MAX_CONTEXT, Math.max(0, Math.trunc(n)));
 }
 async function codeRead(absPath, relPath, opts = {}) {
-  const { source, language, symbols, hasError } = await analyzeFile(absPath);
+  const { source, language, symbols, hasError, timedOut } = await analyzeFile(absPath);
   const baseline = estimateTokens(source);
   const context = contextLinesOf(opts.contextLines);
-  if (!language) {
+  if (!language || timedOut) {
     const numbered = source.split("\n").map((l, i2) => `${String(i2 + 1).padStart(4)}  ${l}`).join("\n");
+    const why = language ? "too large to parse for symbol extraction" : "unsupported for symbol extraction";
     return {
-      text: `${relPath} (whole file, unsupported for symbol extraction):
+      text: `${relPath} (whole file, ${why}):
 ${numbered}`,
       degraded: true,
       meta: makeMeta("code_read", relPath, baseline, estimateTokens(numbered))
@@ -33144,10 +33153,11 @@ function spliceStart(source, sym, newSource) {
   return lineStart + (head.length - head.trimStart().length);
 }
 async function codeEdit(absPath, relPath, symbolName, newSource) {
-  const { source, language, symbols, hasError: hadError } = await analyzeFile(absPath);
+  const { source, language, symbols, hasError: hadError, timedOut } = await analyzeFile(absPath);
   const baseline = estimateTokens(source);
-  if (!language) {
-    const text2 = `Cannot AST-edit ${relPath}: unsupported language. Use the built-in Edit tool for this file.`;
+  if (!language || timedOut) {
+    const why = language ? "the file is too large to parse in time" : "unsupported language";
+    const text2 = `Cannot AST-edit ${relPath}: ${why}. Use the built-in Edit tool for this file.`;
     return { text: text2, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text2)) };
   }
   const found = resolveSymbol2(symbols, symbolName);
@@ -33177,7 +33187,11 @@ File left unchanged.`;
   }
   const start2 = spliceStart(source, found, newSource);
   const next = source.slice(0, start2) + newSource + source.slice(found.endIndex);
-  const { hasError: breaksNow, symbols: after } = await extractSymbols(next, language);
+  const { hasError: breaksNow, symbols: after, timedOut: validationTimedOut } = await extractSymbols(next, language);
+  if (validationTimedOut) {
+    const text2 = `Edit rejected: the edited ${relPath} is too large to validate in time. Use the built-in Edit tool. File left unchanged.`;
+    return { text: text2, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text2)) };
+  }
   if (breaksNow && !hadError) {
     const text2 = `Edit rejected: replacing "${found.qualifiedName}" would introduce a syntax error. File left unchanged.`;
     return { text: text2, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text2)) };

@@ -30,11 +30,12 @@ export async function codeEdit(
   symbolName: string,
   newSource: string,
 ): Promise<ToolResult> {
-  const { source, language, symbols, hasError: hadError } = await analyzeFile(absPath);
+  const { source, language, symbols, hasError: hadError, timedOut } = await analyzeFile(absPath);
   const baseline = estimateTokens(source); // the whole-file re-read this edit avoids
 
-  if (!language) {
-    const text = `Cannot AST-edit ${relPath}: unsupported language. Use the built-in Edit tool for this file.`;
+  if (!language || timedOut) {
+    const why = language ? "the file is too large to parse in time" : "unsupported language";
+    const text = `Cannot AST-edit ${relPath}: ${why}. Use the built-in Edit tool for this file.`;
     return { text, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text)) };
   }
 
@@ -71,7 +72,11 @@ export async function codeEdit(
   const next = source.slice(0, start) + newSource + source.slice(found.endIndex);
 
   // Validate: don't write code that newly breaks the parse.
-  const { hasError: breaksNow, symbols: after } = await extractSymbols(next, language);
+  const { hasError: breaksNow, symbols: after, timedOut: validationTimedOut } = await extractSymbols(next, language);
+  if (validationTimedOut) {
+    const text = `Edit rejected: the edited ${relPath} is too large to validate in time. Use the built-in Edit tool. File left unchanged.`;
+    return { text, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text)) };
+  }
   if (breaksNow && !hadError) {
     const text = `Edit rejected: replacing "${found.qualifiedName}" would introduce a syntax error. File left unchanged.`;
     return { text, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text)) };

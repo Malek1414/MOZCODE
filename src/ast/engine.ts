@@ -224,13 +224,34 @@ export interface ParseResult {
   symbols: Symbol[];
   /** True when the source contains a syntax error. */
   hasError: boolean;
+  /** True when the parse was cancelled for exceeding the time budget (symbols is empty). */
+  timedOut?: boolean;
 }
 
+/**
+ * Longest a single parse may run. Parsing is synchronous and blocks the whole
+ * stdio server, so a huge or generated file (a minified bundle, a multi-MB
+ * fixture) would otherwise stall every other tool call. Ordinary source files
+ * parse in milliseconds.
+ */
+export const PARSE_TIME_BUDGET_MS = 500;
+
 /** Parse source and extract its top-level and member symbols. */
-export async function extractSymbols(source: string, language: LanguageId): Promise<ParseResult> {
+export async function extractSymbols(
+  source: string,
+  language: LanguageId,
+  budgetMs: number = PARSE_TIME_BUDGET_MS,
+): Promise<ParseResult> {
   const parser = await parserFor(language);
-  const tree = parser.parse(source);
-  if (!tree) return { symbols: [], hasError: true };
+  const started = performance.now();
+  const tree = parser.parse(source, null, {
+    progressCallback: () => performance.now() - started > budgetMs,
+  });
+  if (!tree) {
+    // A cancelled parse resumes on the next call unless reset, and the parser is shared.
+    parser.reset();
+    return { symbols: [], hasError: true, timedOut: true };
+  }
   // Trees live in the WASM heap and are not garbage collected; symbols are plain
   // objects, so the tree can be freed as soon as they are extracted.
   try {

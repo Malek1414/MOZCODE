@@ -35,18 +35,19 @@ function contextLinesOf(raw: unknown): number {
 }
 
 export async function codeRead(absPath: string, relPath: string, opts: ReadOptions = {}): Promise<ToolResult> {
-  const { source, language, symbols, hasError } = await analyzeFile(absPath);
+  const { source, language, symbols, hasError, timedOut } = await analyzeFile(absPath);
   const baseline = estimateTokens(source);
   const context = contextLinesOf(opts.contextLines);
 
-  // Unsupported language -> plain (numbered) whole-file read.
-  if (!language) {
+  // Unsupported language, or too large to parse in time -> plain (numbered) whole-file read.
+  if (!language || timedOut) {
     const numbered = source
       .split("\n")
       .map((l, i) => `${String(i + 1).padStart(4)}  ${l}`)
       .join("\n");
+    const why = language ? "too large to parse for symbol extraction" : "unsupported for symbol extraction";
     return {
-      text: `${relPath} (whole file, unsupported for symbol extraction):\n${numbered}`,
+      text: `${relPath} (whole file, ${why}):\n${numbered}`,
       degraded: true,
       meta: makeMeta("code_read", relPath, baseline, estimateTokens(numbered)),
     };

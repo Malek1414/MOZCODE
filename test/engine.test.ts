@@ -109,3 +109,28 @@ describe("error handling", () => {
     expect(hasError).toBe(true);
   });
 });
+
+describe("parse time budget", () => {
+  // A large generated file, so the parse cannot finish inside a 1 ms budget.
+  const big = Array.from({ length: 20_000 }, (_, i) => `export function f${i}(a: number): number { return a + ${i}; }`).join("\n");
+
+  it("cancels a parse that runs past the budget", async () => {
+    const r = await extractSymbols(big, "typescript", 1);
+    expect(r.timedOut).toBe(true);
+    expect(r.symbols).toEqual([]);
+  });
+
+  it("leaves the shared parser usable for the next file after a cancel", async () => {
+    await extractSymbols(big, "typescript", 1);
+    const { symbols, hasError, timedOut } = await extractSymbols("export function ok() { return 1; }", "typescript");
+    expect(timedOut).toBeUndefined();
+    expect(hasError).toBe(false);
+    expect(symbols.map((s) => s.name)).toEqual(["ok"]);
+  });
+
+  it("parses an ordinary file within the default budget", async () => {
+    const r = await extractSymbols(big.split("\n").slice(0, 2_000).join("\n"), "typescript");
+    expect(r.timedOut).toBeUndefined();
+    expect(r.symbols).toHaveLength(2_000);
+  });
+});
