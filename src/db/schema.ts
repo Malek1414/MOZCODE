@@ -433,11 +433,33 @@ async function inspectPostgres(connectionString: string, source: string): Promis
   }
 }
 
-async function cachedPostgres(connectionEnv: string, refresh: boolean): Promise<DbSnapshot> {
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const POSTGRES_URL = /^postgres(?:ql)?:\/\//i;
+
+/**
+ * connection_env is chosen by the model, so a prompt-injected call could name
+ * any variable in the server's environment (an API key, a token). Only use a
+ * value that is actually a PostgreSQL URL; anything else is refused without
+ * being parsed, dialed, or echoed back.
+ */
+function postgresUrlFromEnv(connectionEnv: string): string {
+  if (!ENV_NAME.test(connectionEnv)) {
+    throw new Error("connection_env must be an environment variable name (letters, digits, underscore).");
+  }
   const connectionString = process.env[connectionEnv];
   if (!connectionString) {
     throw new Error(`PostgreSQL connection environment variable ${connectionEnv} is not set.`);
   }
+  if (!POSTGRES_URL.test(connectionString.trim())) {
+    throw new Error(
+      `Environment variable ${connectionEnv} does not hold a postgres:// or postgresql:// URL, so db_schema will not use it.`,
+    );
+  }
+  return connectionString.trim();
+}
+
+async function cachedPostgres(connectionEnv: string, refresh: boolean): Promise<DbSnapshot> {
+  const connectionString = postgresUrlFromEnv(connectionEnv);
   const now = Date.now();
   const connectionFingerprint = createHash("sha256").update(connectionString).digest("hex");
   const cached = postgresCache.get(connectionEnv);

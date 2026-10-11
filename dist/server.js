@@ -33198,11 +33198,25 @@ async function inspectPostgres(connectionString, source) {
     await client.end();
   }
 }
-async function cachedPostgres(connectionEnv, refresh) {
+var ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var POSTGRES_URL = /^postgres(?:ql)?:\/\//i;
+function postgresUrlFromEnv(connectionEnv) {
+  if (!ENV_NAME.test(connectionEnv)) {
+    throw new Error("connection_env must be an environment variable name (letters, digits, underscore).");
+  }
   const connectionString = process.env[connectionEnv];
   if (!connectionString) {
     throw new Error(`PostgreSQL connection environment variable ${connectionEnv} is not set.`);
   }
+  if (!POSTGRES_URL.test(connectionString.trim())) {
+    throw new Error(
+      `Environment variable ${connectionEnv} does not hold a postgres:// or postgresql:// URL, so db_schema will not use it.`
+    );
+  }
+  return connectionString.trim();
+}
+async function cachedPostgres(connectionEnv, refresh) {
+  const connectionString = postgresUrlFromEnv(connectionEnv);
   const now = Date.now();
   const connectionFingerprint = createHash("sha256").update(connectionString).digest("hex");
   const cached2 = postgresCache.get(connectionEnv);

@@ -84,4 +84,21 @@ describe("db_schema", () => {
     await expect(dbSchema(dir, { connectionEnv: "MOZCODE_TEST_DATABASE_URL" }))
       .rejects.toThrow("environment variable MOZCODE_TEST_DATABASE_URL is not set");
   });
+
+  it("refuses an env var that does not hold a PostgreSQL URL without echoing it", async () => {
+    const secret = "sk-ant-not-a-database-0123456789";
+    process.env.MOZCODE_TEST_SECRET = secret;
+    try {
+      const attempt = dbSchema(dir, { connectionEnv: "MOZCODE_TEST_SECRET" });
+      await expect(attempt).rejects.toThrow(/does not hold a postgres:\/\/ or postgresql:\/\/ URL/);
+      await attempt.catch((err: Error) => expect(err.message).not.toContain(secret));
+    } finally {
+      delete process.env.MOZCODE_TEST_SECRET;
+    }
+  });
+
+  it("refuses a connection_env that is not a variable name", async () => {
+    await expect(dbSchema(dir, { connectionEnv: "postgres://u:p@h/db" }))
+      .rejects.toThrow(/must be an environment variable name/);
+  });
 });
