@@ -26770,9 +26770,51 @@ var POSTGRES_INDEXES_SQL = `
 function pgKey(schema, table) {
   return `${asText(schema)}.${asText(table)}`;
 }
+function closingParen(text, open) {
+  let depth = 0;
+  for (let i2 = open; i2 < text.length; i2++) {
+    const ch = text[i2];
+    if (ch === '"' || ch === "'") {
+      const end = text.indexOf(ch, i2 + 1);
+      if (end < 0) return text.length;
+      i2 = end;
+    } else if (ch === "(") depth++;
+    else if (ch === ")" && --depth === 0) return i2 + 1;
+  }
+  return text.length;
+}
+function splitTopLevel(text) {
+  const parts2 = [];
+  let start2 = 0;
+  for (let i2 = 0; i2 < text.length; i2++) {
+    const ch = text[i2];
+    if (ch === "(") i2 = closingParen(text, i2) - 1;
+    else if (ch === '"' || ch === "'") {
+      const end = text.indexOf(ch, i2 + 1);
+      i2 = end < 0 ? text.length : end;
+    } else if (ch === ",") {
+      parts2.push(text.slice(start2, i2));
+      start2 = i2 + 1;
+    }
+  }
+  parts2.push(text.slice(start2));
+  return parts2.map((p) => p.trim()).filter(Boolean);
+}
+var PLAIN_INDEX_COLUMN = /^("(?:[^"]|"")*"|[A-Za-z_][\w$]*)(?:\s|$)/;
 function indexColumns(definition) {
-  const match = definition.match(/\(([^)]+)\)/);
-  return match ? match[1].split(",").map((column) => column.trim().replace(/^"|"$/g, "")) : [];
+  const using = /\sUSING\s+\S+\s*\(/i.exec(definition);
+  const open = using ? using.index + using[0].length - 1 : definition.indexOf("(");
+  if (open < 0) return [];
+  const list = definition.slice(open + 1, closingParen(definition, open) - 1);
+  return splitTopLevel(list).map((element) => {
+    const plain = PLAIN_INDEX_COLUMN.exec(element);
+    if (plain) {
+      const name2 = plain[1];
+      return name2.startsWith('"') ? name2.slice(1, -1).replace(/""/g, '"') : name2;
+    }
+    const paren = element.indexOf("(");
+    return paren < 0 ? element : element.slice(0, closingParen(element, paren)).trim();
+  });
 }
 function postgresSnapshot(source, tables, columns, fks, indexes) {
   const columnsByTable = /* @__PURE__ */ new Map();

@@ -300,9 +300,63 @@ function pgKey(schema: unknown, table: unknown): string {
   return `${asText(schema)}.${asText(table)}`;
 }
 
-function indexColumns(definition: string): string[] {
-  const match = definition.match(/\(([^)]+)\)/);
-  return match ? match[1].split(",").map((column) => column.trim().replace(/^"|"$/g, "")) : [];
+/** Index just past the ")" that closes the "(" at `open`, skipping quoted text. */
+function closingParen(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") {
+      const end = text.indexOf(ch, i + 1);
+      if (end < 0) return text.length;
+      i = end; // a doubled quote ("" or '') just reopens on the next char
+    } else if (ch === "(") depth++;
+    else if (ch === ")" && --depth === 0) return i + 1;
+  }
+  return text.length;
+}
+
+/** Split on commas that are not nested in parentheses or quotes. */
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(") i = closingParen(text, i) - 1;
+    else if (ch === '"' || ch === "'") {
+      const end = text.indexOf(ch, i + 1);
+      i = end < 0 ? text.length : end;
+    } else if (ch === ",") {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+const PLAIN_INDEX_COLUMN = /^("(?:[^"]|"")*"|[A-Za-z_][\w$]*)(?:\s|$)/;
+
+/**
+ * Key columns of a pg_indexes.indexdef, e.g.
+ * `CREATE INDEX i ON public.t USING btree (lower((email)::text), id DESC) INCLUDE (x) WHERE (...)`
+ * gives ["lower((email)::text)", "id"]. Plain columns drop opclass/ordering/collation
+ * options; expressions are kept verbatim.
+ */
+export function indexColumns(definition: string): string[] {
+  const using = /\sUSING\s+\S+\s*\(/i.exec(definition);
+  const open = using ? using.index + using[0].length - 1 : definition.indexOf("(");
+  if (open < 0) return [];
+  const list = definition.slice(open + 1, closingParen(definition, open) - 1);
+  return splitTopLevel(list).map((element) => {
+    const plain = PLAIN_INDEX_COLUMN.exec(element);
+    if (plain) {
+      const name = plain[1];
+      return name.startsWith('"') ? name.slice(1, -1).replace(/""/g, '"') : name;
+    }
+    // Expression: keep the parenthesised/function-call part, drop trailing options.
+    const paren = element.indexOf("(");
+    return paren < 0 ? element : element.slice(0, closingParen(element, paren)).trim();
+  });
 }
 
 function postgresSnapshot(source: string, tables: Row[], columns: Row[], fks: Row[], indexes: Row[]): DbSnapshot {
