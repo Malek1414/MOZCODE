@@ -82,6 +82,27 @@ describe("Python extraction", () => {
   });
 });
 
+describe("nested Python classes", () => {
+  it("qualifies nested members with the full class path", async () => {
+    const src = [
+      "class Outer:",
+      "    class Meta:",
+      "        def run(self):",
+      "            return 1",
+      "",
+      "class Meta:",
+      "    def run(self):",
+      "        return 2",
+      "",
+    ].join("\n");
+    const { symbols } = await extractSymbols(src, "python");
+    const names = symbols.map((s) => s.qualifiedName);
+    expect(names).toEqual(["Outer", "Outer.Meta", "Outer.Meta.run", "Meta", "Meta.run"]);
+    expect(resolveSymbol(symbols, "Meta.run")?.startLine).toBe(7);
+    expect(resolveSymbol(symbols, "Outer.Meta.run")?.startLine).toBe(3);
+  });
+});
+
 describe("error handling", () => {
   it("flags syntax errors without throwing", async () => {
     const { hasError } = await extractSymbols("function broken( {", "typescript");

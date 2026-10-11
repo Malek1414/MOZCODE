@@ -24797,10 +24797,11 @@ function handlePyNode(node, source, out2, container, depth, spanNode) {
     case "class_definition": {
       const name2 = nameFromField(node);
       if (!name2) return;
-      out2.push(mkSymbol(spanNode ?? node, name2, "class", pySignature(node, source), container, depth));
+      const cls = mkSymbol(spanNode ?? node, name2, "class", pySignature(node, source), container, depth);
+      out2.push(cls);
       const body2 = node.childForFieldName("body");
       if (body2) {
-        for (const child of body2.namedChildren) if (child) handlePyNode(child, source, out2, name2, depth + 1);
+        for (const child of body2.namedChildren) if (child) handlePyNode(child, source, out2, cls.qualifiedName, depth + 1);
       }
       return;
     }

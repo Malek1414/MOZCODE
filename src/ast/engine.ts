@@ -188,9 +188,12 @@ function handlePyNode(node: Node, source: string, out: Symbol[], container: stri
     case "class_definition": {
       const name = nameFromField(node);
       if (!name) return;
-      out.push(mkSymbol(spanNode ?? node, name, "class", pySignature(node, source), container, depth));
+      const cls = mkSymbol(spanNode ?? node, name, "class", pySignature(node, source), container, depth);
+      out.push(cls);
+      // Members of a nested class are qualified by the full path (Outer.Inner.m),
+      // so they don't collide with a top-level class of the same name.
       const body = node.childForFieldName("body");
-      if (body) for (const child of body.namedChildren) if (child) handlePyNode(child, source, out, name, depth + 1);
+      if (body) for (const child of body.namedChildren) if (child) handlePyNode(child, source, out, cls.qualifiedName, depth + 1);
       return;
     }
     case "expression_statement": {
