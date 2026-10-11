@@ -23,6 +23,7 @@
     "build": "node scripts/bundle.mjs",
     "install:codex": "node scripts/install-codex.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify:bundle": "node scripts/verify-bundle.mjs",
     "dev": "tsx src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
