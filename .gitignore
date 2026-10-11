@@ -8,3 +8,6 @@ node_modules/
 # Local research / benchmark docs — kept out of the public repo
 wozcode-teardown.md
 benchmark.md
+
+# Default output of scripts/preview-dashboard.ts
+dash-preview.html
