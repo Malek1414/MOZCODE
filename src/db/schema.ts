@@ -112,10 +112,10 @@ function asNumber(value: unknown): number {
   return typeof value === "number" ? value : Number(value);
 }
 
-function groupRows(rows: Row[], key: string): Map<string, Row[]> {
+function groupRows(rows: Row[], keyOf: (row: Row) => string): Map<string, Row[]> {
   const grouped = new Map<string, Row[]>();
   for (const row of rows) {
-    const name = asText(row[key]);
+    const name = keyOf(row);
     const values = grouped.get(name) ?? [];
     values.push(row);
     grouped.set(name, values);
@@ -124,9 +124,10 @@ function groupRows(rows: Row[], key: string): Map<string, Row[]> {
 }
 
 function sqliteSnapshot(source: string, tables: Row[], columns: Row[], fks: Row[], indexes: Row[]): DbSnapshot {
-  const columnsByTable = groupRows(columns, "table_name");
-  const fksByTable = groupRows(fks, "table_name");
-  const indexesByTable = groupRows(indexes, "table_name");
+  const byTable = (row: Row) => asText(row.table_name);
+  const columnsByTable = groupRows(columns, byTable);
+  const fksByTable = groupRows(fks, byTable);
+  const indexesByTable = groupRows(indexes, byTable);
 
   const objects: DbObject[] = tables.map((table) => {
     const name = asText(table.name);
@@ -363,21 +364,11 @@ export function indexColumns(definition: string): string[] {
 }
 
 function postgresSnapshot(source: string, tables: Row[], columns: Row[], fks: Row[], indexes: Row[]): DbSnapshot {
-  const columnsByTable = new Map<string, Row[]>();
-  const fksByTable = new Map<string, Row[]>();
-  const indexesByTable = new Map<string, Row[]>();
-  for (const row of columns) {
-    const key = pgKey(row.table_schema, row.table_name);
-    columnsByTable.set(key, [...(columnsByTable.get(key) ?? []), row]);
-  }
-  for (const row of fks) {
-    const key = pgKey(row.table_schema, row.table_name);
-    fksByTable.set(key, [...(fksByTable.get(key) ?? []), row]);
-  }
-  for (const row of indexes) {
-    const key = pgKey(row.table_schema, row.table_name);
-    indexesByTable.set(key, [...(indexesByTable.get(key) ?? []), row]);
-  }
+  // Appending in place: copying the group's array per row was O(k^2) for a table with k columns.
+  const byTable = (row: Row) => pgKey(row.table_schema, row.table_name);
+  const columnsByTable = groupRows(columns, byTable);
+  const fksByTable = groupRows(fks, byTable);
+  const indexesByTable = groupRows(indexes, byTable);
 
   const objects: DbObject[] = tables.map((table) => {
     const schema = asText(table.table_schema);

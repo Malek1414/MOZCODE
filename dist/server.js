@@ -33326,10 +33326,10 @@ function asText(value) {
 function asNumber(value) {
   return typeof value === "number" ? value : Number(value);
 }
-function groupRows(rows, key) {
+function groupRows(rows, keyOf) {
   const grouped = /* @__PURE__ */ new Map();
   for (const row of rows) {
-    const name2 = asText(row[key]);
+    const name2 = keyOf(row);
     const values = grouped.get(name2) ?? [];
     values.push(row);
     grouped.set(name2, values);
@@ -33337,9 +33337,10 @@ function groupRows(rows, key) {
   return grouped;
 }
 function sqliteSnapshot(source, tables, columns, fks, indexes) {
-  const columnsByTable = groupRows(columns, "table_name");
-  const fksByTable = groupRows(fks, "table_name");
-  const indexesByTable = groupRows(indexes, "table_name");
+  const byTable = (row) => asText(row.table_name);
+  const columnsByTable = groupRows(columns, byTable);
+  const fksByTable = groupRows(fks, byTable);
+  const indexesByTable = groupRows(indexes, byTable);
   const objects = tables.map((table) => {
     const name2 = asText(table.name);
     const foreignKeys = /* @__PURE__ */ new Map();
@@ -33548,21 +33549,10 @@ function indexColumns(definition) {
   });
 }
 function postgresSnapshot(source, tables, columns, fks, indexes) {
-  const columnsByTable = /* @__PURE__ */ new Map();
-  const fksByTable = /* @__PURE__ */ new Map();
-  const indexesByTable = /* @__PURE__ */ new Map();
-  for (const row of columns) {
-    const key = pgKey(row.table_schema, row.table_name);
-    columnsByTable.set(key, [...columnsByTable.get(key) ?? [], row]);
-  }
-  for (const row of fks) {
-    const key = pgKey(row.table_schema, row.table_name);
-    fksByTable.set(key, [...fksByTable.get(key) ?? [], row]);
-  }
-  for (const row of indexes) {
-    const key = pgKey(row.table_schema, row.table_name);
-    indexesByTable.set(key, [...indexesByTable.get(key) ?? [], row]);
-  }
+  const byTable = (row) => pgKey(row.table_schema, row.table_name);
+  const columnsByTable = groupRows(columns, byTable);
+  const fksByTable = groupRows(fks, byTable);
+  const indexesByTable = groupRows(indexes, byTable);
   const objects = tables.map((table) => {
     const schema = asText(table.table_schema);
     const name2 = asText(table.table_name);
