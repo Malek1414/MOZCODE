@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,5 +13,43 @@ describe("hooks.json", () => {
     const matcher: string = hooks.hooks.SessionStart[0].matcher;
     const sources = matcher.split("|");
     for (const source of ["startup", "resume", "clear", "compact"]) expect(sources).toContain(source);
+  });
+});
+
+describe("Codex SessionStart hook", () => {
+  it("is declared separately so Codex does not run the Claude Code hook", () => {
+    const manifest = JSON.parse(readFileSync(join(root, ".codex-plugin", "plugin.json"), "utf8"));
+    expect(manifest.hooks).toBe("./.codex-plugin/hooks.json");
+    const hooks = JSON.parse(readFileSync(join(root, ".codex-plugin", "hooks.json"), "utf8"));
+    const entry = hooks.hooks.SessionStart[0];
+    for (const source of ["startup", "resume", "clear", "compact"]) expect(entry.matcher.split("|")).toContain(source);
+    expect(entry.hooks[0].command).toContain("hooks/session-start.mjs");
+    expect(entry.hooks[0].command).toContain("--host=codex");
+  });
+
+  it("never writes ~/.claude/settings.json and names Codex's tools", () => {
+    const home = mkdtempSync(join(tmpdir(), "mozcode-codex-hook-"));
+    try {
+      const run = (args: string[]) =>
+        spawnSync(process.execPath, ["--no-warnings", join(root, "hooks", "session-start.mjs"), ...args], {
+          input: JSON.stringify({ cwd: "/work/project", source: "startup" }),
+          env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_ROOT: root, MOZCODE_NO_STATUSLINE: "" },
+          encoding: "utf8",
+        });
+      const codex = run(["--host=codex"]);
+      expect(codex.status).toBe(0);
+      const ctx: string = JSON.parse(codex.stdout).hookSpecificOutput.additionalContext;
+      expect(ctx).toContain("/work/project");
+      expect(ctx).toContain("apply_patch");
+      expect(ctx).not.toContain("built-in Read");
+      expect(existsSync(join(home, ".claude", "settings.json"))).toBe(false);
+
+      // The Claude Code path still installs the status line.
+      const claude = run([]);
+      expect(claude.status).toBe(0);
+      expect(existsSync(join(home, ".claude", "settings.json"))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
