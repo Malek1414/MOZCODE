@@ -9,6 +9,7 @@
 // Code's status line at the Codex plugin copy), and the nudge names Codex's
 // own tools instead of Claude Code's Read/Grep.
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { installStatusLine, defaultSettingsPath } from "./statusline-install.mjs";
 
 let input = "";
@@ -29,7 +30,9 @@ const isCodex = process.argv.includes("--host=codex");
 
 // Install/refresh the status line (Claude Code only). Best-effort: never blocks
 // or breaks startup.
-const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || new URL("..", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: pathname stays percent-encoded ("%20") and is
+// "/C:/..." on Windows, which would write a broken status line command.
+const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || fileURLToPath(new URL("..", import.meta.url));
 let statusLineAction = "skipped";
 if (!isCodex) {
   try {

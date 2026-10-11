@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -50,6 +50,35 @@ describe("Codex SessionStart hook", () => {
       expect(existsSync(join(home, ".claude", "settings.json"))).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("session-start plugin root fallback", () => {
+  it("resolves its own directory when CLAUDE_PLUGIN_ROOT is unset, even with spaces in the path", () => {
+    const base = mkdtempSync(join(tmpdir(), "mozcode hook "));
+    try {
+      const plugin = join(base, "plugin root");
+      mkdirSync(join(plugin, "hooks"), { recursive: true });
+      mkdirSync(join(plugin, "dist"), { recursive: true });
+      for (const f of ["session-start.mjs", "statusline-install.mjs"]) {
+        copyFileSync(join(root, "hooks", f), join(plugin, "hooks", f));
+      }
+      writeFileSync(join(plugin, "dist", "statusline.js"), "");
+      const home = join(base, "home");
+      const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home };
+      delete env.CLAUDE_PLUGIN_ROOT;
+      delete env.MOZCODE_NO_STATUSLINE;
+      const r = spawnSync(process.execPath, ["--no-warnings", join(plugin, "hooks", "session-start.mjs")], {
+        input: "{}",
+        env,
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(0);
+      const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+      expect(settings.statusLine.command).toContain(join(plugin, "dist", "statusline.js"));
+    } finally {
+      rmSync(base, { recursive: true, force: true });
     }
   });
 });
