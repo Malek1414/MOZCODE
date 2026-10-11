@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -39,6 +40,11 @@ describe("Codex compatibility: plugin manifest", () => {
 });
 
 describe("project resolution guard", () => {
+  // Spawned servers write session pointers and metering entries; keep them out
+  // of the developer's real ~/.mozcode dashboard and statusline.
+  const home = mkdtempSync(join(tmpdir(), "mozcode-codex-compat-"));
+  afterAll(() => rmSync(home, { recursive: true, force: true }));
+
   const callTool = (
     cwd: string,
     name: string,
@@ -49,7 +55,7 @@ describe("project resolution guard", () => {
       const child = spawn("node", ["--no-warnings", join(root, "dist", "server.js")], {
         cwd,
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, MOZCODE_PROJECT: "", ...env },
+        env: { ...process.env, MOZCODE_HOME: home, MOZCODE_PROJECT: "", ...env },
       });
       const send = (message: unknown) => child.stdin.write(`${JSON.stringify(message)}\n`);
       let buffer = "";
