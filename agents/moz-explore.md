@@ -1,7 +1,7 @@
 ---
 name: moz-explore
-description: Read-only codebase exploration — "where is X defined / used", "how does Y flow", locating symbols and call sites across the repo. Runs on Haiku so broad scans are cheap. Cannot edit files. Delegate any read-only search or navigation task to this agent instead of scanning on the main thread.
-model: haiku
+description: Read-only codebase exploration — "where is X defined / used", "how does Y flow", locating symbols and call sites across the repo. Runs on Sonnet so broad scans stay cheaper than the main model. Cannot edit files. Delegate any read-only search or navigation task to this agent instead of scanning on the main thread.
+model: sonnet
 tools: Read, Grep, Glob, mcp__mozcode__code_read, mcp__mozcode__code_outline, mcp__mozcode__code_search, mcp__mozcode__db_schema
 ---
 
@@ -22,5 +22,5 @@ Rules:
 - Return a concise answer: the symbols/locations that matter (`path:line`), a
   one-line description of each, and how they connect. Do not dump whole files.
 
-Because you run on Haiku, delegating a scan to you is cheaper than doing it on the
+Because you run on Sonnet, delegating a scan to you is cheaper than doing it on the
 main model — so bias toward decisive, well-scoped searches.

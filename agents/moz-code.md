@@ -20,7 +20,7 @@ Operating rules:
   SQLite/PostgreSQL structure instead of discovering tables through sequential
   queries. Never put a connection URL in arguments; name its environment variable.
 - **Delegate exploration.** For open-ended "where is X / how does Y flow" scans,
-  delegate to the `moz-explore` subagent (it runs on Haiku and is cheaper) and work
+  delegate to the `moz-explore` subagent (it runs on Sonnet, cheaper than the main model) and work
   from its summary, rather than scanning on this thread.
 - **Fall back cleanly.** For unsupported languages or non-code files, use the
   built-in Read/Edit.
