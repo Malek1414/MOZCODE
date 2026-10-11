@@ -8,6 +8,8 @@ import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 
 const MAX_MATCHES = 200;
+/** Files read concurrently by code_search. */
+const READ_BATCH = 32;
 
 interface RawMatch {
   file: string;
@@ -66,17 +68,25 @@ export async function codeSearch(
   pathGlob?: string,
 ): Promise<ToolResult> {
   const { rx, note } = compileQuery(query);
-  const files = await listSourceFiles(root);
+  const files = (await listSourceFiles(root)).filter(
+    (file) => !pathGlob || matchesGlob(path.isAbsolute(pathGlob) ? file : path.relative(root, file), pathGlob),
+  );
   const matches: RawMatch[] = [];
 
-  for (const file of files) {
-    if (pathGlob && !matchesGlob(path.isAbsolute(pathGlob) ? file : path.relative(root, file), pathGlob)) continue;
-    let source: string;
-    try {
-      source = await readCachedSource(file);
-    } catch {
-      continue;
-    }
+  // Read files in parallel batches but scan them in walk order, so results and
+  // the MAX_MATCHES cut-off stay deterministic. One stat+read at a time made a
+  // cold search scale with per-file I/O latency times the file count.
+  let batch: Promise<string | null>[] = [];
+  const readBatch = (from: number) => {
+    batch = files.slice(from, from + READ_BATCH).map((f) => readCachedSource(f).catch(() => null));
+  };
+  readBatch(0);
+  for (let idx = 0; idx < files.length; idx++) {
+    const slot = idx % READ_BATCH;
+    if (slot === 0 && idx > 0) readBatch(idx);
+    const file = files[idx];
+    const source = await batch[slot];
+    if (source === null) continue;
     let offset = 0;
     const lines = source.split("\n");
     for (let i = 0; i < lines.length; i++) {

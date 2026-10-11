@@ -105,6 +105,25 @@ describe("code_read", () => {
 });
 
 describe("code_search", () => {
+  it("reads many files concurrently but keeps walk order and the match cap", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "mozcode-search-many-"));
+    try {
+      // 3 batches' worth of files, 4 hits each: 280 hits, capped at 200.
+      for (let i = 0; i < 70; i++) {
+        const name = `f${String(i).padStart(2, "0")}.ts`;
+        await fs.writeFile(join(root, name), Array.from({ length: 4 }, (_, k) => `export const needle${i}_${k} = ${k};`).join("\n"));
+      }
+      const first = await codeSearch(root, "needle");
+      expect(first.text).toContain("200+ matches");
+      expect(first.text).toContain("TRUNCATED");
+      // Deterministic: the same files win the cap every time.
+      expect((await codeSearch(root, "needle")).text).toBe(first.text);
+      expect((await codeSearch(root, "needle69_")).text).toContain("f69.ts");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("groups matches by actionable qualified symbol names", async () => {
     const r = await codeSearch(join(here, "fixtures"), "balance");
     expect(r.text).toContain("Account.constructor");

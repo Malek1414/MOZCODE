@@ -33069,6 +33069,7 @@ function matchesGlob(filePath, glob) {
 
 // src/tools/search.ts
 var MAX_MATCHES = 200;
+var READ_BATCH = 32;
 function compileQuery(query) {
   try {
     return { rx: RE2JS.compile(query) };
@@ -33096,16 +33097,21 @@ function enclosing(symbols, offset) {
 }
 async function codeSearch(root, query, pathGlob) {
   const { rx, note } = compileQuery(query);
-  const files2 = await listSourceFiles(root);
+  const files2 = (await listSourceFiles(root)).filter(
+    (file) => !pathGlob || matchesGlob(path3.isAbsolute(pathGlob) ? file : path3.relative(root, file), pathGlob)
+  );
   const matches = [];
-  for (const file of files2) {
-    if (pathGlob && !matchesGlob(path3.isAbsolute(pathGlob) ? file : path3.relative(root, file), pathGlob)) continue;
-    let source;
-    try {
-      source = await readCachedSource(file);
-    } catch {
-      continue;
-    }
+  let batch = [];
+  const readBatch = (from) => {
+    batch = files2.slice(from, from + READ_BATCH).map((f) => readCachedSource(f).catch(() => null));
+  };
+  readBatch(0);
+  for (let idx = 0; idx < files2.length; idx++) {
+    const slot = idx % READ_BATCH;
+    if (slot === 0 && idx > 0) readBatch(idx);
+    const file = files2[idx];
+    const source = await batch[slot];
+    if (source === null) continue;
     let offset = 0;
     const lines = source.split("\n");
     for (let i2 = 0; i2 < lines.length; i2++) {
