@@ -24632,8 +24632,12 @@ function runtimeWasm() {
 async function initParser() {
   if (!initPromise) {
     const rt = runtimeWasm();
-    initPromise = Parser.init({
+    const pending = Parser.init({
       locateFile: (name2) => name2.endsWith(".wasm") ? rt : name2
+    });
+    initPromise = pending;
+    pending.catch(() => {
+      if (initPromise === pending) initPromise = null;
     });
   }
   return initPromise;
@@ -24646,6 +24650,10 @@ async function loadLanguage(id) {
       return Language.load(path.join(assetsDir(), GRAMMAR_FILE[id]));
     })();
     languageCache.set(id, cached2);
+    const pending = cached2;
+    pending.catch(() => {
+      if (languageCache.get(id) === pending) languageCache.delete(id);
+    });
   }
   return cached2;
 }
@@ -24876,13 +24884,17 @@ async function readCachedSource(filePath) {
 async function analyzeFile(filePath) {
   const entry = await currentEntry(filePath);
   if (!entry.analysis) {
-    entry.analysis = (async () => {
+    const pending = (async () => {
       const source = await entry.source;
       const language = languageForPath(filePath);
       if (!language) return { source, language, symbols: [], hasError: false };
       const parsed = await extractSymbols(source, language);
       return { source, language, ...parsed };
     })();
+    entry.analysis = pending;
+    pending.catch(() => {
+      if (entry.analysis === pending) entry.analysis = void 0;
+    });
   }
   return entry.analysis;
 }

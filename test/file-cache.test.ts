@@ -1,0 +1,34 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+afterEach(() => {
+  vi.resetModules();
+  vi.doUnmock("../src/ast/engine.js");
+});
+
+describe("file cache", () => {
+  it("retries analysis after a transient failure instead of caching the rejection", async () => {
+    const real = await vi.importActual<typeof import("../src/ast/engine.js")>("../src/ast/engine.js");
+    let calls = 0;
+    vi.doMock("../src/ast/engine.js", () => ({
+      ...real,
+      extractSymbols: async (...args: Parameters<typeof real.extractSymbols>) => {
+        calls += 1;
+        if (calls === 1) throw new Error("transient");
+        return real.extractSymbols(...args);
+      },
+    }));
+    const { analyzeFile } = await import("../src/ast/file-cache.js");
+    const p = join(tmpdir(), `mozcode-cache-${Date.now()}-${Math.random().toString(36).slice(2)}.ts`);
+    await fs.writeFile(p, "export function f() { return 1; }\n");
+    try {
+      await expect(analyzeFile(p)).rejects.toThrow("transient");
+      const ok = await analyzeFile(p);
+      expect(ok.symbols.map((s) => s.name)).toContain("f");
+    } finally {
+      await fs.rm(p, { force: true });
+    }
+  });
+});

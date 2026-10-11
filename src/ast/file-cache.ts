@@ -69,13 +69,18 @@ export async function readCachedSource(filePath: string): Promise<string> {
 export async function analyzeFile(filePath: string): Promise<FileAnalysis> {
   const entry = await currentEntry(filePath);
   if (!entry.analysis) {
-    entry.analysis = (async () => {
+    const pending = (async () => {
       const source = await entry.source;
       const language = languageForPath(filePath);
       if (!language) return { source, language, symbols: [], hasError: false };
       const parsed = await extractSymbols(source, language);
       return { source, language, ...parsed };
     })();
+    entry.analysis = pending;
+    // Retry on the next call instead of serving a cached failure until the file changes.
+    pending.catch(() => {
+      if (entry.analysis === pending) entry.analysis = undefined;
+    });
   }
   return entry.analysis;
 }

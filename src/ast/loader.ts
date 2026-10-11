@@ -46,9 +46,15 @@ function runtimeWasm(): string {
 export async function initParser(): Promise<void> {
   if (!initPromise) {
     const rt = runtimeWasm();
-    initPromise = Parser.init({
+    const pending: Promise<void> = Parser.init({
       locateFile: (name: string) => (name.endsWith(".wasm") ? rt : name),
     } as never);
+    initPromise = pending;
+    // Don't cache a failure: a transient error would otherwise disable every
+    // AST feature until the server restarts.
+    pending.catch(() => {
+      if (initPromise === pending) initPromise = null;
+    });
   }
   return initPromise;
 }
@@ -62,6 +68,10 @@ export async function loadLanguage(id: LanguageId): Promise<Language> {
       return Language.load(path.join(assetsDir(), GRAMMAR_FILE[id]));
     })();
     languageCache.set(id, cached);
+    const pending = cached;
+    pending.catch(() => {
+      if (languageCache.get(id) === pending) languageCache.delete(id);
+    });
   }
   return cached;
 }
