@@ -9,6 +9,8 @@ import * as crypto from "node:crypto";
 function mozcodeHome() {
   return process.env.MOZCODE_HOME || path.join(os.homedir(), ".mozcode");
 }
+var PRIVATE_DIR_MODE = 448;
+var PRIVATE_FILE_MODE = 384;
 function meteringDir() {
   return path.join(mozcodeHome(), "metering");
 }
@@ -32,74 +34,153 @@ function isMeteringEntry(v) {
   const e = v;
   return typeof e.ts === "string" && typeof e.session === "string" && typeof e.project === "string" && typeof e.tool === "string" && (e.path === void 0 || typeof e.path === "string") && Number.isFinite(e.baselineTokens) && Number.isFinite(e.actualTokens) && Number.isFinite(e.savedTokens);
 }
-async function loadEntries() {
-  const dir = meteringDir();
-  let files;
-  try {
-    files = (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl"));
-  } catch {
-    return [];
+
+// src/metering/rollup.ts
+import { promises as fs2 } from "node:fs";
+import * as path2 from "node:path";
+var VERSION = 1;
+function rollupPath() {
+  return path2.join(mozcodeHome(), "cache", "statusline-rollup.json");
+}
+function emptyTotals() {
+  return { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
+}
+function addEntry(t, e) {
+  t.calls += 1;
+  t.baseline += e.baselineTokens;
+  t.actual += e.actualTokens;
+  t.saved += e.savedTokens;
+  const tool = t.tools[e.tool] ??= [0, 0, 0];
+  tool[0] += 1;
+  if (e.savedTokens > 0) tool[1] += 1;
+  tool[2] += e.savedTokens;
+}
+function mergeTotals(into, from) {
+  into.calls += from.calls;
+  into.baseline += from.baseline;
+  into.actual += from.actual;
+  into.saved += from.saved;
+  for (const [tool, [calls, saving, saved]] of Object.entries(from.tools)) {
+    const t = into.tools[tool] ??= [0, 0, 0];
+    t[0] += calls;
+    t[1] += saving;
+    t[2] += saved;
   }
-  const out = [];
-  for (const f of files) {
-    const raw = await fs.readFile(path.join(dir, f), "utf8").catch(() => "");
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (isMeteringEntry(parsed)) out.push(parsed);
-      } catch {
+  return into;
+}
+function totalsToSummary(t, projects = 0) {
+  return {
+    calls: t.calls,
+    totalBaseline: t.baseline,
+    totalActual: t.actual,
+    totalSaved: t.saved,
+    avgReductionPct: t.baseline > 0 ? t.saved / t.baseline * 100 : 0,
+    projects,
+    byTool: Object.entries(t.tools).map(([tool, [calls, savingCalls, saved]]) => ({ tool, calls, savingCalls, saved })).sort((a, b) => b.saved - a.saved),
+    byDay: [],
+    byFile: [],
+    bySession: []
+  };
+}
+function addLine(projects, line) {
+  if (!line.trim()) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (!isMeteringEntry(parsed)) return;
+  const e = parsed;
+  const p = projects[e.project] ??= { total: emptyTotals(), sessions: {}, latestTs: "", latestSession: "" };
+  addEntry(p.total, e);
+  addEntry(p.sessions[e.session] ??= emptyTotals(), e);
+  if (e.ts > p.latestTs) {
+    p.latestTs = e.ts;
+    p.latestSession = e.session;
+  }
+}
+async function readState() {
+  try {
+    const parsed = JSON.parse(await fs2.readFile(rollupPath(), "utf8"));
+    if (parsed && parsed.version === VERSION && parsed.files && typeof parsed.files === "object") return parsed;
+  } catch {
+  }
+  return { version: VERSION, files: {} };
+}
+async function writeState(state) {
+  const file = rollupPath();
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    await fs2.mkdir(path2.dirname(file), { recursive: true, mode: PRIVATE_DIR_MODE });
+    await fs2.writeFile(tmp, JSON.stringify(state), { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+    await fs2.rename(tmp, file);
+  } catch {
+    await fs2.rm(tmp, { force: true }).catch(() => {
+    });
+  }
+}
+async function updateFile(full, prev) {
+  let fh;
+  try {
+    fh = await fs2.open(full, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const stat = await fh.stat();
+    let base = prev;
+    if (base && (base.dev !== stat.dev || base.ino !== stat.ino || base.offset > stat.size)) base = void 0;
+    if (base && base.offset > 0) {
+      const probe = Buffer.alloc(1);
+      await fh.read(probe, 0, 1, base.offset - 1);
+      if (probe[0] !== 10) base = void 0;
+    }
+    const start = base?.offset ?? 0;
+    const next = base ?? { dev: stat.dev, ino: stat.ino, offset: 0, projects: {} };
+    if (stat.size === start) return { next, changed: base !== prev };
+    const buf = Buffer.alloc(stat.size - start);
+    const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+    const end = buf.lastIndexOf(10, bytesRead - 1);
+    if (end < 0) return { next, changed: base !== prev };
+    for (const line of buf.toString("utf8", 0, end).split("\n")) addLine(next.projects, line);
+    next.offset = start + end + 1;
+    return { next, changed: true };
+  } finally {
+    await fh.close();
+  }
+}
+async function loadRollup() {
+  const dir = meteringDir();
+  let names;
+  try {
+    names = (await fs2.readdir(dir)).filter((f) => f.endsWith(".jsonl")).sort();
+  } catch {
+    return {};
+  }
+  const state = await readState();
+  const files = {};
+  let changed = Object.keys(state.files).some((name) => !names.includes(name));
+  for (const name of names) {
+    const updated = await updateFile(path2.join(dir, name), state.files[name]);
+    if (!updated) continue;
+    files[name] = updated.next;
+    changed ||= updated.changed;
+  }
+  if (changed) await writeState({ version: VERSION, files });
+  const out = {};
+  for (const file of Object.values(files)) {
+    for (const [project, p] of Object.entries(file.projects)) {
+      const into = out[project] ??= { total: emptyTotals(), sessions: {}, latestTs: "", latestSession: "" };
+      mergeTotals(into.total, p.total);
+      for (const [session, t] of Object.entries(p.sessions)) mergeTotals(into.sessions[session] ??= emptyTotals(), t);
+      if (p.latestTs > into.latestTs) {
+        into.latestTs = p.latestTs;
+        into.latestSession = p.latestSession;
       }
     }
   }
   return out;
-}
-function summarize(entries, topFiles = 15) {
-  const byTool = /* @__PURE__ */ new Map();
-  const byDay = /* @__PURE__ */ new Map();
-  const byFile = /* @__PURE__ */ new Map();
-  const bySession = /* @__PURE__ */ new Map();
-  const projects = /* @__PURE__ */ new Set();
-  let totalBaseline = 0;
-  let totalActual = 0;
-  let totalSaved = 0;
-  for (const e of entries) {
-    totalBaseline += e.baselineTokens;
-    totalActual += e.actualTokens;
-    totalSaved += e.savedTokens;
-    projects.add(e.project);
-    const t = byTool.get(e.tool) ?? { calls: 0, savingCalls: 0, saved: 0 };
-    t.calls += 1;
-    if (e.savedTokens > 0) t.savingCalls += 1;
-    t.saved += e.savedTokens;
-    byTool.set(e.tool, t);
-    const day = e.ts.slice(0, 10);
-    byDay.set(day, (byDay.get(day) ?? 0) + e.savedTokens);
-    if (e.path) {
-      const f = byFile.get(e.path) ?? { calls: 0, saved: 0 };
-      f.calls += 1;
-      f.saved += e.savedTokens;
-      byFile.set(e.path, f);
-    }
-    const s = bySession.get(e.session) ?? { calls: 0, baseline: 0, actual: 0, saved: 0 };
-    s.calls += 1;
-    s.baseline += e.baselineTokens;
-    s.actual += e.actualTokens;
-    s.saved += e.savedTokens;
-    bySession.set(e.session, s);
-  }
-  return {
-    calls: entries.length,
-    totalBaseline,
-    totalActual,
-    totalSaved,
-    avgReductionPct: totalBaseline > 0 ? totalSaved / totalBaseline * 100 : 0,
-    projects: projects.size,
-    byTool: [...byTool.entries()].map(([tool, v]) => ({ tool, ...v })).sort((a, b) => b.saved - a.saved),
-    byDay: [...byDay.entries()].map(([day, saved]) => ({ day, saved })).sort((a, b) => a.day.localeCompare(b.day)),
-    byFile: [...byFile.entries()].map(([path3, v]) => ({ path: path3, ...v })).sort((a, b) => b.saved - a.saved).slice(0, topFiles),
-    bySession: [...bySession.entries()].map(([session, v]) => ({ session, ...v })).sort((a, b) => b.saved - a.saved)
-  };
 }
 
 // src/dashboard/metrics.ts
@@ -149,7 +230,7 @@ function fmtUsd(v) {
 }
 
 // src/statusline.ts
-import * as path2 from "node:path";
+import * as path3 from "node:path";
 function readStdin() {
   return new Promise((resolve) => {
     let data = "";
@@ -175,19 +256,19 @@ function compact(n) {
   if (n < 1e6) return `${(n / 1e3).toFixed(n < 1e4 ? 1 : 0)}k`;
   return `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0)}M`;
 }
-function segment(entries) {
-  const m = computeMetrics(summarize(entries), entries);
+function segment(totals) {
+  const m = computeMetrics(totalsToSummary(totals ?? { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} }), []);
   return `${fmtUsd(m.costSaved)} \xB7 ${compact(m.tokensSaved)} tokens \xB7 ${fmtDuration(
     m.timeSavedSec
   )} \xB7 ${m.callsSaved} roundtrips`;
 }
-async function resolveProject(candidates, all) {
-  const known = new Set(all.map((e) => e.project));
+async function resolveProject(candidates, projects) {
+  const known = new Set(Object.keys(projects));
   for (const dir of candidates) {
     if (known.has(dir) || await readCurrentSession(dir)) return dir;
   }
   for (const dir of candidates) {
-    for (let p = path2.dirname(dir); p !== path2.dirname(p); p = path2.dirname(p)) {
+    for (let p = path3.dirname(dir); p !== path3.dirname(p); p = path3.dirname(p)) {
       if (known.has(p)) return p;
     }
   }
@@ -203,15 +284,15 @@ async function main() {
   } catch {
   }
   if (candidates.length === 0) candidates.push(process.cwd());
-  const all = await loadEntries();
-  const project = await resolveProject(candidates, all);
-  const forProject = all.filter((e) => e.project === project);
+  const projects = await loadRollup();
+  const project = await resolveProject(candidates, projects);
+  const all = { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
+  for (const p of Object.values(projects)) mergeTotals(all, p.total);
+  const forProject = projects[project];
   let sessionId = await readCurrentSession(project);
-  if (!sessionId && forProject.length) {
-    sessionId = forProject.reduce((a, b) => a.ts >= b.ts ? a : b).session;
-  }
-  const sessionEntries = sessionId ? forProject.filter((e) => e.session === sessionId) : [];
-  const line = `\u26A1 MOZCODE est. session: ${segment(sessionEntries)}  \u2502  all-time: ${segment(all)}`;
+  if (!sessionId && forProject?.latestSession) sessionId = forProject.latestSession;
+  const sessionTotals = sessionId ? forProject?.sessions[sessionId] : void 0;
+  const line = `\u26A1 MOZCODE est. session: ${segment(sessionTotals)}  \u2502  all-time: ${segment(all)}`;
   process.stdout.write(blue(line));
 }
 main().catch(() => {

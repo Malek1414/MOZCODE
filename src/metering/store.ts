@@ -26,7 +26,7 @@ export function mozcodeHome(): string {
 export const PRIVATE_DIR_MODE = 0o700;
 export const PRIVATE_FILE_MODE = 0o600;
 
-function meteringDir(): string {
+export function meteringDir(): string {
   return path.join(mozcodeHome(), "metering");
 }
 
@@ -93,7 +93,7 @@ export async function readCurrentSession(project: string): Promise<string | unde
   }
 }
 
-function isMeteringEntry(v: unknown): v is MeteringEntry {
+export function isMeteringEntry(v: unknown): v is MeteringEntry {
   if (!v || typeof v !== "object") return false;
   const e = v as Record<string, unknown>;
   return (

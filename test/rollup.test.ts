@@ -1,0 +1,73 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadRollup, rollupPath } from "../src/metering/rollup.js";
+
+let home: string;
+let ledger: string;
+
+const line = (session: string, saved: number, ts = "2026-10-01T00:00:00.000Z", tool = "code_read") =>
+  JSON.stringify({ ts, session, project: "/p", tool, baselineTokens: saved * 2, actualTokens: saved, savedTokens: saved }) + "\n";
+
+beforeEach(async () => {
+  home = await fs.mkdtemp(join(tmpdir(), "mozcode-rollup-"));
+  process.env.MOZCODE_HOME = home;
+  await fs.mkdir(join(home, "metering"));
+  ledger = join(home, "metering", "p-000000000000.jsonl");
+});
+
+afterEach(async () => {
+  delete process.env.MOZCODE_HOME;
+  await fs.rm(home, { recursive: true, force: true });
+});
+
+describe("metering rollup", () => {
+  it("adds only appended records and keeps per-session totals", async () => {
+    await fs.writeFile(ledger, line("a", 10) + line("b", 5, "2026-10-02T00:00:00.000Z"));
+    let r = await loadRollup();
+    expect(r["/p"].total.saved).toBe(15);
+    expect(r["/p"].latestSession).toBe("b");
+
+    await fs.appendFile(ledger, line("a", 100, "2026-10-01T00:00:00.000Z", "code_edit"));
+    r = await loadRollup();
+    expect(r["/p"].total.saved).toBe(115);
+    expect(r["/p"].total.calls).toBe(3);
+    expect(r["/p"].sessions.a.saved).toBe(110);
+    expect(r["/p"].sessions.a.tools.code_edit).toEqual([1, 1, 100]);
+    expect(r["/p"].latestSession).toBe("b");
+  });
+
+  it("waits for a partially written record instead of losing it", async () => {
+    const full = line("a", 7);
+    await fs.writeFile(ledger, line("a", 1) + full.slice(0, 20));
+    expect((await loadRollup())["/p"].total.saved).toBe(1);
+    await fs.appendFile(ledger, full.slice(20));
+    expect((await loadRollup())["/p"].total.saved).toBe(8);
+  });
+
+  it("recounts a ledger that was truncated or rewritten", async () => {
+    await fs.writeFile(ledger, line("a", 10) + line("a", 20));
+    expect((await loadRollup())["/p"].total.saved).toBe(30);
+    await fs.writeFile(ledger, line("a", 3)); // shorter than what was consumed
+    expect((await loadRollup())["/p"].total.saved).toBe(3);
+    // Same length or longer, rewritten in place: the consumed prefix no longer ends on a newline.
+    await fs.writeFile(ledger, line("a", 4444) + line("a", 5));
+    const r = await loadRollup();
+    expect(r["/p"].total.saved).toBe(4449);
+  });
+
+  it("rebuilds from the ledger when the rollup file is corrupt, and skips bad lines", async () => {
+    await fs.writeFile(ledger, line("a", 10) + "not json\nnull\n" + line("a", 1));
+    await loadRollup();
+    await fs.writeFile(rollupPath(), "{garbage");
+    expect((await loadRollup())["/p"].total.saved).toBe(11);
+  });
+
+  it("drops a ledger file that was deleted", async () => {
+    await fs.writeFile(ledger, line("a", 10));
+    await loadRollup();
+    await fs.rm(ledger);
+    expect(await loadRollup()).toEqual({});
+  });
+});
