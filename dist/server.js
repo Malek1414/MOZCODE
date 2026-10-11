@@ -26320,12 +26320,40 @@ async function listSourceFiles(root, limit = 5e3) {
   await walk(root);
   return out2;
 }
+function globToRegex(glob) {
+  let rx = "";
+  for (let i2 = 0; i2 < glob.length; i2++) {
+    const c = glob[i2];
+    if (c === "*") {
+      if (glob[i2 + 1] === "*") {
+        if (glob[i2 + 2] === "/") {
+          rx += "(?:.*/)?";
+          i2 += 2;
+        } else {
+          rx += ".*";
+          i2 += 1;
+        }
+      } else {
+        rx += "[^/]*";
+      }
+    } else if (c === "?") {
+      rx += "[^/]";
+    } else {
+      rx += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp("^" + rx + "$");
+}
 function matchesGlob(filePath, glob) {
-  const normalized = filePath.split(path2.sep).join("/");
-  const rx = new RegExp(
-    "^" + glob.split(path2.sep).join("/").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "\0").replace(/\*/g, "[^/]*").replace(/ /g, ".*") + "$"
-  );
-  return rx.test(normalized) || normalized.endsWith(glob);
+  const normalized = filePath.split(path2.sep).join("/").replace(/^\.\//, "");
+  const pattern = glob.split(path2.sep).join("/").replace(/^\.\//, "");
+  if (!/[*?]/.test(pattern)) {
+    const dir = pattern.replace(/\/+$/, "");
+    if (normalized.startsWith(dir + "/")) return true;
+  }
+  const rx = globToRegex(pattern);
+  if (!pattern.includes("/")) return rx.test(path2.posix.basename(normalized));
+  return rx.test(normalized);
 }
 
 // src/tools/search.ts
@@ -26351,7 +26379,7 @@ async function codeSearch(root, query, pathGlob) {
   const files2 = await listSourceFiles(root);
   const matches = [];
   for (const file of files2) {
-    if (pathGlob && !matchesGlob(file, pathGlob)) continue;
+    if (pathGlob && !matchesGlob(path3.isAbsolute(pathGlob) ? file : path3.relative(root, file), pathGlob)) continue;
     let source;
     try {
       source = await readCachedSource(file);

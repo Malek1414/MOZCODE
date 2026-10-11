@@ -44,7 +44,7 @@ export async function codeSearch(
   const matches: RawMatch[] = [];
 
   for (const file of files) {
-    if (pathGlob && !matchesGlob(file, pathGlob)) continue;
+    if (pathGlob && !matchesGlob(path.isAbsolute(pathGlob) ? file : path.relative(root, file), pathGlob)) continue;
     let source: string;
     try {
       source = await readCachedSource(file);
