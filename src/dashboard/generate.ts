@@ -31,9 +31,14 @@ export async function generateDashboard(): Promise<{ path: string; totalSaved: n
 
 /** Best-effort open in the default browser. */
 export function openInBrowser(target: string): void {
-  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  // explorer.exe opens a file with its default handler without going through a
+  // shell, so a path with spaces or shell metacharacters stays one argument.
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
   try {
-    const child = spawn(cmd, [target], { detached: true, stdio: "ignore", shell: process.platform === "win32" });
+    const child = spawn(cmd, [target], { detached: true, stdio: "ignore" });
+    // A missing opener (no xdg-open on a headless box) is reported as an async
+    // 'error' event; unhandled, it would crash the MCP server.
+    child.on("error", () => {});
     child.unref();
   } catch {
     /* opening is best-effort */

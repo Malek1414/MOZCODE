@@ -27402,9 +27402,11 @@ async function generateDashboard() {
   return { path: out2, totalSaved: summary.totalSaved, calls: summary.calls };
 }
 function openInBrowser(target) {
-  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
   try {
-    const child = spawn(cmd, [target], { detached: true, stdio: "ignore", shell: process.platform === "win32" });
+    const child = spawn(cmd, [target], { detached: true, stdio: "ignore" });
+    child.on("error", () => {
+    });
     child.unref();
   } catch {
   }

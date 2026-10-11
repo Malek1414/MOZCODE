@@ -80,3 +80,22 @@ describe("metric derivations", () => {
     expect(m.efficiencyGainPct).toBeGreaterThan(80);
   });
 });
+
+describe("openInBrowser", () => {
+  it("survives a missing opener binary instead of crashing the server", async () => {
+    const { openInBrowser } = await import("../src/dashboard/generate.js");
+    const savedPath = process.env.PATH;
+    let uncaught: unknown;
+    const onUncaught = (e: unknown) => { uncaught = e; };
+    process.on("uncaughtException", onUncaught);
+    try {
+      process.env.PATH = "/nonexistent-mozcode-bin";
+      openInBrowser("/nonexistent/dashboard.html");
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      process.env.PATH = savedPath;
+      process.off("uncaughtException", onUncaught);
+    }
+    expect(uncaught).toBeUndefined();
+  });
+});
