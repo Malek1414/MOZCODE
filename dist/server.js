@@ -26459,6 +26459,16 @@ ${blocks.join("\n")}`;
 
 // src/tools/edit.ts
 import { promises as fs5 } from "node:fs";
+var MODIFIER_PREFIX = /^(?:(?:export|default|declare)\s+)*(?:export|default|declare)$/;
+function spliceStart(source, sym, newSource) {
+  const lineStart = source.lastIndexOf("\n", sym.startIndex - 1) + 1;
+  const head = source.slice(lineStart, sym.startIndex);
+  const modifiers = head.trim();
+  if (!modifiers || !MODIFIER_PREFIX.test(modifiers)) return sym.startIndex;
+  const next = newSource.trimStart();
+  if (!next.startsWith(modifiers) || !/\s/.test(next.charAt(modifiers.length))) return sym.startIndex;
+  return lineStart + (head.length - head.trimStart().length);
+}
 async function codeEdit(absPath, relPath, symbolName, newSource) {
   const { source, language, symbols, hasError: hadError } = await analyzeFile(absPath);
   const baseline = estimateTokens(source);
@@ -26473,7 +26483,26 @@ async function codeEdit(absPath, relPath, symbolName, newSource) {
 ${outline}`;
     return { text: text2, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text2)) };
   }
-  const next = source.slice(0, found.startIndex) + newSource + source.slice(found.endIndex);
+  if (found.qualifiedName !== symbolName) {
+    const candidates = symbols.filter((s) => s.name === symbolName);
+    if (candidates.length > 1) {
+      const list = candidates.map((s) => `  ${s.qualifiedName} [${s.kind} L${s.startLine}-${s.endLine}]`).join("\n");
+      const text2 = `Edit rejected: "${symbolName}" is ambiguous in ${relPath}. Use a qualified name:
+${list}
+File left unchanged.`;
+      return { text: text2, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text2)) };
+    }
+  }
+  const siblings = symbols.filter(
+    (s) => s !== found && s.startIndex === found.startIndex && s.endIndex === found.endIndex
+  );
+  if (siblings.length > 0) {
+    const names = siblings.map((s) => s.qualifiedName).join(", ");
+    const text2 = `Edit rejected: "${found.qualifiedName}" shares its declaration statement with ${names}; replacing it would also overwrite them. Use the built-in Edit tool for this statement. File left unchanged.`;
+    return { text: text2, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text2)) };
+  }
+  const start2 = spliceStart(source, found, newSource);
+  const next = source.slice(0, start2) + newSource + source.slice(found.endIndex);
   const { hasError: breaksNow } = await extractSymbols(next, language);
   if (breaksNow && !hadError) {
     const text2 = `Edit rejected: replacing "${found.qualifiedName}" would introduce a syntax error. File left unchanged.`;

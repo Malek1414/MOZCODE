@@ -122,4 +122,40 @@ describe("code_edit", () => {
     const after = await fs.readFile(tmp, "utf8");
     expect(after).toBe(before); // unchanged
   });
+  it("accepts new_source that repeats the export modifier shown by code_read", async () => {
+    const r = await codeEdit(tmp, "sample.ts", "add", "export function add(a: number, b: number): number {\n  return b + a;\n}");
+    expect(r.degraded).toBe(false);
+    const content = await fs.readFile(tmp, "utf8");
+    expect(content).toContain("export function add(a: number, b: number): number {\n  return b + a;\n}");
+    expect(content).not.toContain("export export");
+  });
+
+  it("keeps the export modifier when new_source omits it", async () => {
+    const r = await codeEdit(tmp, "sample.ts", "multiply", "const multiply = (a: number, b: number): number => a * b;");
+    expect(r.degraded).toBe(false);
+    expect(await fs.readFile(tmp, "utf8")).toContain("export const multiply = (a: number, b: number): number => a * b;");
+  });
+
+  it("refuses an ambiguous bare name instead of editing the first match", async () => {
+    await fs.writeFile(tmp, "class A {\n  run(): number { return 1; }\n}\nclass B {\n  run(): number { return 2; }\n}\n");
+    const before = await fs.readFile(tmp, "utf8");
+    const r = await codeEdit(tmp, "x.ts", "run", "run(): number { return 3; }");
+    expect(r.degraded).toBe(true);
+    expect(r.text).toContain("ambiguous");
+    expect(r.text).toContain("A.run");
+    expect(r.text).toContain("B.run");
+    expect(await fs.readFile(tmp, "utf8")).toBe(before);
+    const ok = await codeEdit(tmp, "x.ts", "B.run", "run(): number { return 3; }");
+    expect(ok.degraded).toBe(false);
+    expect(await fs.readFile(tmp, "utf8")).toContain("return 1;");
+  });
+
+  it("refuses to overwrite sibling declarators in one statement", async () => {
+    await fs.writeFile(tmp, "const a = 1, b = 2;\nexport const c = 3;\n");
+    const before = await fs.readFile(tmp, "utf8");
+    const r = await codeEdit(tmp, "x.ts", "a", "const a = 10;");
+    expect(r.degraded).toBe(true);
+    expect(r.text).toContain("shares its declaration statement with b");
+    expect(await fs.readFile(tmp, "utf8")).toBe(before);
+  });
 });
