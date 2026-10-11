@@ -20,10 +20,24 @@ function withContext(source: string, startLine: number, endLine: number, context
     .join("\n");
 }
 
+const DEFAULT_CONTEXT = 3;
+const MAX_CONTEXT = 200;
+
+/**
+ * Normalize context_lines from untrusted tool input. A string ("2") would turn
+ * `endLine + context` into string concatenation, a negative value would cut the
+ * symbol short, and NaN would return nothing.
+ */
+function contextLinesOf(raw: unknown): number {
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isFinite(n)) return DEFAULT_CONTEXT;
+  return Math.min(MAX_CONTEXT, Math.max(0, Math.trunc(n)));
+}
+
 export async function codeRead(absPath: string, relPath: string, opts: ReadOptions = {}): Promise<ToolResult> {
   const { source, language, symbols, hasError } = await analyzeFile(absPath);
   const baseline = estimateTokens(source);
-  const context = opts.contextLines ?? 3;
+  const context = contextLinesOf(opts.contextLines);
 
   // Unsupported language -> plain (numbered) whole-file read.
   if (!language) {

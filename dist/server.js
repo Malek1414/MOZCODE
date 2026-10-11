@@ -26225,10 +26225,17 @@ function withContext(source, startLine, endLine, context) {
   const to = Math.min(lines.length, endLine + context);
   return lines.slice(from, to).map((l, i2) => `${String(from + i2 + 1).padStart(4)}  ${l}`).join("\n");
 }
+var DEFAULT_CONTEXT = 3;
+var MAX_CONTEXT = 200;
+function contextLinesOf(raw) {
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isFinite(n)) return DEFAULT_CONTEXT;
+  return Math.min(MAX_CONTEXT, Math.max(0, Math.trunc(n)));
+}
 async function codeRead(absPath, relPath, opts = {}) {
   const { source, language, symbols, hasError } = await analyzeFile(absPath);
   const baseline = estimateTokens(source);
-  const context = opts.contextLines ?? 3;
+  const context = contextLinesOf(opts.contextLines);
   if (!language) {
     const numbered = source.split("\n").map((l, i2) => `${String(i2 + 1).padStart(4)}  ${l}`).join("\n");
     return {

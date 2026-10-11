@@ -96,6 +96,18 @@ describe("code_search", () => {
   });
 });
 
+describe("code_read context_lines", () => {
+  it("treats string, negative and NaN values sanely", async () => {
+    const asString = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add", contextLines: "1" as unknown as number });
+    const asNumber = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add", contextLines: 1 });
+    expect(asString.text).toBe(asNumber.text);
+    const negative = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add", contextLines: -5 });
+    expect(negative.text).toContain("return a + b;");
+    const nan = await codeRead(fixture("sample.ts"), "sample.ts", { symbol: "add", contextLines: Number.NaN });
+    expect(nan.text).toContain("return a + b;");
+  });
+});
+
 describe("code_edit", () => {
   let tmp: string;
   beforeEach(async () => {
