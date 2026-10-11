@@ -59,6 +59,27 @@ describe("db_schema", () => {
     expect(result.text).not.toContain("audit_log(");
   });
 
+  it("sees schema changes still in the WAL file without refresh", async () => {
+    const writer = new DatabaseSync(databasePath);
+    try {
+      writer.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;");
+      const before = await dbSchema(dir, { path: "app.sqlite" });
+      expect(before.text).not.toContain("invoices(");
+      const mainBefore = await fs.stat(databasePath);
+
+      writer.exec("CREATE TABLE invoices (id INTEGER PRIMARY KEY, total REAL);");
+      const mainAfter = await fs.stat(databasePath);
+      // The change sits in app.sqlite-wal; the main file is untouched.
+      expect(mainAfter.mtimeMs).toBe(mainBefore.mtimeMs);
+      expect(mainAfter.size).toBe(mainBefore.size);
+
+      const after = await dbSchema(dir, { path: "app.sqlite" });
+      expect(after.text).toContain("invoices(");
+    } finally {
+      writer.close();
+    }
+  });
+
   it("does not accept PostgreSQL credentials as tool input", async () => {
     await expect(dbSchema(dir, { connectionEnv: "MOZCODE_TEST_DATABASE_URL" }))
       .rejects.toThrow("environment variable MOZCODE_TEST_DATABASE_URL is not set");

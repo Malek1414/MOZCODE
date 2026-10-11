@@ -26693,15 +26693,24 @@ async function inspectSqlite(filePath) {
   }
   return sqliteSnapshot(filePath, ...rows);
 }
+async function walStamp(filePath) {
+  try {
+    const wal = await fs6.stat(`${filePath}-wal`);
+    return `${wal.mtimeMs}:${wal.size}`;
+  } catch {
+    return "";
+  }
+}
 async function cachedSqlite(filePath, refresh) {
-  const stat = await fs6.stat(filePath);
+  const [stat, wal] = await Promise.all([fs6.stat(filePath), walStamp(filePath)]);
   const cached2 = sqliteCache.get(filePath);
-  if (!refresh && cached2 && cached2.mtimeMs === stat.mtimeMs && cached2.size === stat.size) {
+  if (!refresh && cached2 && cached2.mtimeMs === stat.mtimeMs && cached2.size === stat.size && cached2.wal === wal) {
     return cached2.snapshot;
   }
   const entry = {
     mtimeMs: stat.mtimeMs,
     size: stat.size,
+    wal,
     snapshot: inspectSqlite(filePath)
   };
   sqliteCache.set(filePath, entry);

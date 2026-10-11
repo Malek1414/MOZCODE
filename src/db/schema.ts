@@ -59,6 +59,8 @@ export interface DbSchemaOptions {
 interface SqliteCacheEntry {
   mtimeMs: number;
   size: number;
+  /** "mtime:size" of the -wal file, or "" when there is none. */
+  wal: string;
   snapshot: Promise<DbSnapshot>;
 }
 
@@ -213,15 +215,29 @@ async function inspectSqlite(filePath: string): Promise<DbSnapshot> {
   return sqliteSnapshot(filePath, ...rows);
 }
 
+/**
+ * In WAL mode, committed schema changes live in the -wal file until a
+ * checkpoint copies them into the main file, so its stat is part of the key.
+ */
+async function walStamp(filePath: string): Promise<string> {
+  try {
+    const wal = await fs.stat(`${filePath}-wal`);
+    return `${wal.mtimeMs}:${wal.size}`;
+  } catch {
+    return "";
+  }
+}
+
 async function cachedSqlite(filePath: string, refresh: boolean): Promise<DbSnapshot> {
-  const stat = await fs.stat(filePath);
+  const [stat, wal] = await Promise.all([fs.stat(filePath), walStamp(filePath)]);
   const cached = sqliteCache.get(filePath);
-  if (!refresh && cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+  if (!refresh && cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.wal === wal) {
     return cached.snapshot;
   }
   const entry: SqliteCacheEntry = {
     mtimeMs: stat.mtimeMs,
     size: stat.size,
+    wal,
     snapshot: inspectSqlite(filePath),
   };
   sqliteCache.set(filePath, entry);
