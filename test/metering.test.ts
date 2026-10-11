@@ -38,4 +38,14 @@ describe("metering store", () => {
     expect(s.byFile[0].saved).toBe(1350);
     expect(s.avgReductionPct).toBeGreaterThan(80);
   });
+  it("skips lines that parse as JSON but are not entries", async () => {
+    await record("/proj/a", "s1", makeMeta("code_read", "a.ts", 1000, 100));
+    const dir = join(home, "metering");
+    const [file] = await fs.readdir(dir);
+    await fs.appendFile(join(dir, file), 'null\n{}\n[1]\n{"ts":"x","session":"s","project":"p","tool":"t","baselineTokens":"9"}\n');
+    const entries = await loadEntries();
+    expect(entries).toHaveLength(1);
+    const s = summarize(entries);
+    expect(s.totalSaved).toBe(900);
+  });
 });

@@ -26957,6 +26957,11 @@ async function writeCurrentSession(project, session) {
   } catch {
   }
 }
+function isMeteringEntry(v) {
+  if (!v || typeof v !== "object") return false;
+  const e = v;
+  return typeof e.ts === "string" && typeof e.session === "string" && typeof e.project === "string" && typeof e.tool === "string" && (e.path === void 0 || typeof e.path === "string") && Number.isFinite(e.baselineTokens) && Number.isFinite(e.actualTokens) && Number.isFinite(e.savedTokens);
+}
 async function loadEntries() {
   const dir = meteringDir();
   let files2;
@@ -26971,7 +26976,8 @@ async function loadEntries() {
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
-        out2.push(JSON.parse(line));
+        const parsed = JSON.parse(line);
+        if (isMeteringEntry(parsed)) out2.push(parsed);
       } catch {
       }
     }

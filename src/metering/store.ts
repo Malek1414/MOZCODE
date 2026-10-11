@@ -87,7 +87,26 @@ export async function readCurrentSession(project: string): Promise<string | unde
   }
 }
 
-/** Load all metering entries across every project. */
+function isMeteringEntry(v: unknown): v is MeteringEntry {
+  if (!v || typeof v !== "object") return false;
+  const e = v as Record<string, unknown>;
+  return (
+    typeof e.ts === "string" &&
+    typeof e.session === "string" &&
+    typeof e.project === "string" &&
+    typeof e.tool === "string" &&
+    (e.path === undefined || typeof e.path === "string") &&
+    Number.isFinite(e.baselineTokens) &&
+    Number.isFinite(e.actualTokens) &&
+    Number.isFinite(e.savedTokens)
+  );
+}
+
+/**
+ * Load all metering entries across every project. Lines that are not valid
+ * entries (truncated writes, "null", hand-edited rows) are skipped so one bad
+ * line cannot make summarize() throw or turn every total into NaN.
+ */
 export async function loadEntries(): Promise<MeteringEntry[]> {
   const dir = meteringDir();
   let files: string[];
@@ -102,7 +121,8 @@ export async function loadEntries(): Promise<MeteringEntry[]> {
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
-        out.push(JSON.parse(line) as MeteringEntry);
+        const parsed: unknown = JSON.parse(line);
+        if (isMeteringEntry(parsed)) out.push(parsed);
       } catch {
         /* skip malformed line */
       }
