@@ -71,7 +71,7 @@ export async function codeEdit(
   const next = source.slice(0, start) + newSource + source.slice(found.endIndex);
 
   // Validate: don't write code that newly breaks the parse.
-  const { hasError: breaksNow } = await extractSymbols(next, language);
+  const { hasError: breaksNow, symbols: after } = await extractSymbols(next, language);
   if (breaksNow && !hadError) {
     const text = `Edit rejected: replacing "${found.qualifiedName}" would introduce a syntax error. File left unchanged.`;
     return { text, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text)) };
@@ -82,7 +82,19 @@ export async function codeEdit(
 
   const newLineCount = newSource.split("\n").length;
   const newEndLine = found.startLine + newLineCount - 1;
-  const text = `Edited ${relPath} › ${found.qualifiedName} (${found.kind}). New span L${found.startLine}-${newEndLine}. No re-read needed.`;
+  let text = `Edited ${relPath} › ${found.qualifiedName} (${found.kind}). New span L${found.startLine}-${newEndLine}. No re-read needed.`;
+  // The parse check cannot catch new_source that is only a body or the wrong
+  // declaration (and is skipped entirely when the file already had errors), so
+  // say when the edited symbol no longer exists. Renames and deletions land here too.
+  if (!after.some((s) => s.qualifiedName === found.qualifiedName)) {
+    const added = after
+      .filter((s) => s.startIndex >= start && s.endIndex <= start + newSource.length)
+      .map((s) => s.qualifiedName);
+    text +=
+      `\nWarning: ${relPath} no longer defines "${found.qualifiedName}"` +
+      (added.length ? ` (new_source defines ${added.join(", ")})` : " (new_source defines no symbol)") +
+      `. If you did not mean to rename or delete it, new_source must be the complete declaration.`;
+  }
   return {
     text,
     degraded: false,

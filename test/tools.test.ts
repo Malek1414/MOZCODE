@@ -162,6 +162,21 @@ describe("code_edit", () => {
     expect(await fs.readFile(tmp, "utf8")).toContain("return 1;");
   });
 
+  it("warns when new_source no longer defines the edited symbol", async () => {
+    await fs.writeFile(tmp, "function add(a: number, b: number): number {\n  return a + b;\n}\nfunction keep(): void {}\n");
+    const bodyOnly = await codeEdit(tmp, "x.ts", "add", "a + b;");
+    expect(bodyOnly.degraded).toBe(false);
+    expect(bodyOnly.text).toContain('no longer defines "add" (new_source defines no symbol)');
+
+    await fs.copyFile(fixture("sample.ts"), tmp);
+    const renamed = await codeEdit(tmp, "sample.ts", "add", "function sum(a: number, b: number): number {\n  return a + b;\n}");
+    expect(renamed.text).toContain('no longer defines "add" (new_source defines sum)');
+
+    await fs.copyFile(fixture("sample.ts"), tmp);
+    const same = await codeEdit(tmp, "sample.ts", "add", "function add(a: number, b: number): number {\n  return b + a;\n}");
+    expect(same.text).not.toContain("Warning");
+  });
+
   it("refuses to overwrite sibling declarators in one statement", async () => {
     await fs.writeFile(tmp, "const a = 1, b = 2;\nexport const c = 3;\n");
     const before = await fs.readFile(tmp, "utf8");

@@ -26525,7 +26525,7 @@ File left unchanged.`;
   }
   const start2 = spliceStart(source, found, newSource);
   const next = source.slice(0, start2) + newSource + source.slice(found.endIndex);
-  const { hasError: breaksNow } = await extractSymbols(next, language);
+  const { hasError: breaksNow, symbols: after } = await extractSymbols(next, language);
   if (breaksNow && !hadError) {
     const text2 = `Edit rejected: replacing "${found.qualifiedName}" would introduce a syntax error. File left unchanged.`;
     return { text: text2, degraded: true, meta: makeMeta("code_edit", relPath, 0, estimateTokens(text2)) };
@@ -26534,7 +26534,12 @@ File left unchanged.`;
   invalidateFile(absPath);
   const newLineCount = newSource.split("\n").length;
   const newEndLine = found.startLine + newLineCount - 1;
-  const text = `Edited ${relPath} \u203A ${found.qualifiedName} (${found.kind}). New span L${found.startLine}-${newEndLine}. No re-read needed.`;
+  let text = `Edited ${relPath} \u203A ${found.qualifiedName} (${found.kind}). New span L${found.startLine}-${newEndLine}. No re-read needed.`;
+  if (!after.some((s) => s.qualifiedName === found.qualifiedName)) {
+    const added = after.filter((s) => s.startIndex >= start2 && s.endIndex <= start2 + newSource.length).map((s) => s.qualifiedName);
+    text += `
+Warning: ${relPath} no longer defines "${found.qualifiedName}"` + (added.length ? ` (new_source defines ${added.join(", ")})` : " (new_source defines no symbol)") + `. If you did not mean to rename or delete it, new_source must be the complete declaration.`;
+  }
   return {
     text,
     degraded: false,
