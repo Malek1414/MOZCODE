@@ -31,7 +31,7 @@
     "benchmark:performance": "node --no-warnings --import tsx scripts/benchmark-performance.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.19.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "gpt-tokenizer": "^3.4.0",
     "pg": "^8.22.0",
     "re2js": "^2.8.6",
