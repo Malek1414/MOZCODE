@@ -76,11 +76,30 @@ export async function loadLanguage(id: LanguageId): Promise<Language> {
   return cached;
 }
 
-/** A ready-to-use parser configured for the given language. */
+const parserCache = new Map<LanguageId, Promise<Parser>>();
+
+/**
+ * A ready-to-use parser configured for the given language, shared per language.
+ *
+ * Parsers live in the WASM heap, which never shrinks and is not garbage
+ * collected, so creating one per parse leaked memory for the life of the
+ * server. Sharing is safe: Parser#parse is synchronous, so two callers can
+ * never interleave inside one parse.
+ */
 export async function parserFor(id: LanguageId): Promise<Parser> {
-  await initParser();
-  const language = await loadLanguage(id);
-  const parser = new Parser();
-  parser.setLanguage(language);
-  return parser;
+  let cached = parserCache.get(id);
+  if (!cached) {
+    cached = (async () => {
+      const language = await loadLanguage(id);
+      const parser = new Parser();
+      parser.setLanguage(language);
+      return parser;
+    })();
+    parserCache.set(id, cached);
+    const pending = cached;
+    pending.catch(() => {
+      if (parserCache.get(id) === pending) parserCache.delete(id);
+    });
+  }
+  return cached;
 }

@@ -231,9 +231,15 @@ export async function extractSymbols(source: string, language: LanguageId): Prom
   const parser = await parserFor(language);
   const tree = parser.parse(source);
   if (!tree) return { symbols: [], hasError: true };
-  const root = tree.rootNode;
-  const symbols = language === "python" ? extractPy(root, source) : extractTs(root, source);
-  return { symbols, hasError: root.hasError };
+  // Trees live in the WASM heap and are not garbage collected; symbols are plain
+  // objects, so the tree can be freed as soon as they are extracted.
+  try {
+    const root = tree.rootNode;
+    const symbols = language === "python" ? extractPy(root, source) : extractTs(root, source);
+    return { symbols, hasError: root.hasError };
+  } finally {
+    tree.delete();
+  }
 }
 
 /** Resolve a symbol by bare name or dotted qualified name. */

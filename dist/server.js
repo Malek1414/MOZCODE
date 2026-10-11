@@ -24990,12 +24990,23 @@ async function loadLanguage(id) {
   }
   return cached2;
 }
+var parserCache = /* @__PURE__ */ new Map();
 async function parserFor(id) {
-  await initParser();
-  const language = await loadLanguage(id);
-  const parser = new Parser();
-  parser.setLanguage(language);
-  return parser;
+  let cached2 = parserCache.get(id);
+  if (!cached2) {
+    cached2 = (async () => {
+      const language = await loadLanguage(id);
+      const parser = new Parser();
+      parser.setLanguage(language);
+      return parser;
+    })();
+    parserCache.set(id, cached2);
+    const pending = cached2;
+    pending.catch(() => {
+      if (parserCache.get(id) === pending) parserCache.delete(id);
+    });
+  }
+  return cached2;
 }
 
 // src/ast/engine.ts
@@ -25161,9 +25172,13 @@ async function extractSymbols(source, language) {
   const parser = await parserFor(language);
   const tree = parser.parse(source);
   if (!tree) return { symbols: [], hasError: true };
-  const root = tree.rootNode;
-  const symbols = language === "python" ? extractPy(root, source) : extractTs(root, source);
-  return { symbols, hasError: root.hasError };
+  try {
+    const root = tree.rootNode;
+    const symbols = language === "python" ? extractPy(root, source) : extractTs(root, source);
+    return { symbols, hasError: root.hasError };
+  } finally {
+    tree.delete();
+  }
 }
 function resolveSymbol2(symbols, target) {
   const exact = symbols.find((s) => s.qualifiedName === target);
