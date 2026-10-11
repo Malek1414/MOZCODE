@@ -20,7 +20,7 @@ interface Run {
  * Run the statusline exactly the way Claude Code does: spawn it, write the
  * update JSON on stdin, close stdin, and read stdout until the process exits.
  */
-function runStatusline(home: string, cwd: string): Promise<Run> {
+function runStatusline(home: string, cwd: string, projectDir?: string): Promise<Run> {
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
     let stdout = "";
@@ -36,7 +36,8 @@ function runStatusline(home: string, cwd: string): Promise<Run> {
     });
     child.on("error", reject);
     child.on("close", () => resolve({ stdout, firstByteMs, exitMs: Date.now() - t0 }));
-    child.stdin.end(JSON.stringify({ session_id: "test", cwd, workspace: { current_dir: cwd } }));
+    const workspace = projectDir ? { current_dir: cwd, project_dir: projectDir } : { current_dir: cwd };
+    child.stdin.end(JSON.stringify({ session_id: "test", cwd, workspace }));
   });
 }
 
@@ -120,5 +121,14 @@ describe("statusline", () => {
     const [sessionPart, allTimePart] = out.split("│");
     expect(sessionPart).toContain("2.0k tokens");
     expect(allTimePart).toContain("11k tokens");
+  });
+
+  it("keeps the session segment when the cwd moves into a subdirectory", async () => {
+    await appendEntry(home, project, session, 2000);
+    const viaProjectDir = plain((await runStatusline(home, `${project}/src/deep`, project)).stdout);
+    expect(viaProjectDir.split("│")[0]).toContain("2.0k tokens");
+    // Without workspace.project_dir, the nearest recorded ancestor is used.
+    const viaAncestor = plain((await runStatusline(home, `${project}/src/deep`)).stdout);
+    expect(viaAncestor.split("│")[0]).toContain("2.0k tokens");
   });
 });

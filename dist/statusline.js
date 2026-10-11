@@ -97,7 +97,7 @@ function summarize(entries, topFiles = 15) {
     projects: projects.size,
     byTool: [...byTool.entries()].map(([tool, v]) => ({ tool, ...v })).sort((a, b) => b.saved - a.saved),
     byDay: [...byDay.entries()].map(([day, saved]) => ({ day, saved })).sort((a, b) => a.day.localeCompare(b.day)),
-    byFile: [...byFile.entries()].map(([path2, v]) => ({ path: path2, ...v })).sort((a, b) => b.saved - a.saved).slice(0, topFiles),
+    byFile: [...byFile.entries()].map(([path3, v]) => ({ path: path3, ...v })).sort((a, b) => b.saved - a.saved).slice(0, topFiles),
     bySession: [...bySession.entries()].map(([session, v]) => ({ session, ...v })).sort((a, b) => b.saved - a.saved)
   };
 }
@@ -149,6 +149,7 @@ function fmtUsd(v) {
 }
 
 // src/statusline.ts
+import * as path2 from "node:path";
 function readStdin() {
   return new Promise((resolve) => {
     let data = "";
@@ -180,16 +181,32 @@ function segment(entries) {
     m.timeSavedSec
   )} \xB7 ${m.callsSaved} roundtrips`;
 }
+async function resolveProject(candidates, all) {
+  const known = new Set(all.map((e) => e.project));
+  for (const dir of candidates) {
+    if (known.has(dir) || await readCurrentSession(dir)) return dir;
+  }
+  for (const dir of candidates) {
+    for (let p = path2.dirname(dir); p !== path2.dirname(p); p = path2.dirname(p)) {
+      if (known.has(p)) return p;
+    }
+  }
+  return candidates[0];
+}
 async function main() {
-  let cwd = process.cwd();
+  const candidates = [];
   try {
     const input = JSON.parse(await readStdin() || "{}");
-    cwd = input.cwd || input.workspace?.current_dir || cwd;
+    for (const dir of [input.workspace?.project_dir, input.cwd, input.workspace?.current_dir]) {
+      if (typeof dir === "string" && dir && !candidates.includes(dir)) candidates.push(dir);
+    }
   } catch {
   }
+  if (candidates.length === 0) candidates.push(process.cwd());
   const all = await loadEntries();
-  const forProject = all.filter((e) => e.project === cwd);
-  let sessionId = await readCurrentSession(cwd);
+  const project = await resolveProject(candidates, all);
+  const forProject = all.filter((e) => e.project === project);
+  let sessionId = await readCurrentSession(project);
   if (!sessionId && forProject.length) {
     sessionId = forProject.reduce((a, b) => a.ts >= b.ts ? a : b).session;
   }

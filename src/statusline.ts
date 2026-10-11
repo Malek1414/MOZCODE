@@ -2,12 +2,13 @@
 // Claude Code statusline: prints MOZCODE's estimated savings for the current
 // session and all-time, on the line beneath the prompt. Claude Code invokes
 // this on each update with a JSON blob on stdin (session_id, cwd, model, ...).
-// We only need `cwd` to scope "this session" to the active project.
+// We only need the project directory to scope "this session" to the active project.
 //
 // All figures are ESTIMATES against a naive-tool counterfactual — never billing.
 import { loadEntries, summarize, readCurrentSession } from "./metering/store.js";
 import { computeMetrics, fmtUsd, fmtDuration } from "./dashboard/metrics.js";
 import type { MeteringEntry } from "./metering/store.js";
+import * as path from "node:path";
 
 /** Read the whole stdin stream (the JSON Claude Code hands the statusline). */
 function readStdin(): Promise<string> {
@@ -54,22 +55,45 @@ function segment(entries: MeteringEntry[]): string {
   )} · ${m.callsSaved} roundtrips`;
 }
 
+/**
+ * The project the MCP server meters under. Claude Code starts the server in the
+ * launch directory (workspace.project_dir), while `cwd` follows the session
+ * into subdirectories, so try the project dir first, then the cwd, then the
+ * nearest ancestor of either that has recorded entries.
+ */
+async function resolveProject(candidates: string[], all: MeteringEntry[]): Promise<string> {
+  const known = new Set(all.map((e) => e.project));
+  for (const dir of candidates) {
+    if (known.has(dir) || (await readCurrentSession(dir))) return dir;
+  }
+  for (const dir of candidates) {
+    for (let p = path.dirname(dir); p !== path.dirname(p); p = path.dirname(p)) {
+      if (known.has(p)) return p;
+    }
+  }
+  return candidates[0];
+}
+
 async function main(): Promise<void> {
-  let cwd = process.cwd();
+  const candidates: string[] = [];
   try {
     const input = JSON.parse((await readStdin()) || "{}");
-    cwd = input.cwd || input.workspace?.current_dir || cwd;
+    for (const dir of [input.workspace?.project_dir, input.cwd, input.workspace?.current_dir]) {
+      if (typeof dir === "string" && dir && !candidates.includes(dir)) candidates.push(dir);
+    }
   } catch {
     /* no/invalid stdin — fall back to process cwd */
   }
+  if (candidates.length === 0) candidates.push(process.cwd());
 
   const all = await loadEntries();
+  const project = await resolveProject(candidates, all);
 
   // "This session" = the active metering session for this project. The server
   // publishes it on startup; if that's missing, fall back to the session of the
   // most recent entry recorded for this project.
-  const forProject = all.filter((e) => e.project === cwd);
-  let sessionId = await readCurrentSession(cwd);
+  const forProject = all.filter((e) => e.project === project);
+  let sessionId = await readCurrentSession(project);
   if (!sessionId && forProject.length) {
     sessionId = forProject.reduce((a, b) => (a.ts >= b.ts ? a : b)).session;
   }
