@@ -61,6 +61,20 @@ describe("six-metric dashboard renderer", () => {
     expect(html).toContain('aria-label="Cumulative tokens saved by day"');
   });
 
+  it("escapes every ledger-derived string (paths, tools, sessions, timestamps)", () => {
+    // The ledger is a plain JSONL file; a tampered or hostile line must not be
+    // able to inject markup into the dashboard opened in the user's browser.
+    const evil = "<img src=x onerror=alert(1)>";
+    const html = renderDashboard(summarize([
+      ...dataset,
+      entry({ path: `src/${evil}.ts`, session: evil, project: `/p/${evil}` }),
+      entry({ tool: evil, path: evil }),
+      entry({ ts: "<b>x</b><img src=x onerror=alert(1)>" }),
+    ]));
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<b>x");
+  });
+
   it("handles an empty dataset without crashing", () => {
     const html = renderDashboard(summarize([]));
     expect(html).toContain("No data yet.");

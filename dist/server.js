@@ -33583,8 +33583,8 @@ function areaChart(byDay) {
     const gy = pad.t + ih - f * ih;
     return `<line x1="${pad.l}" y1="${gy}" x2="${w - pad.r}" y2="${gy}" class="grid"/><text x="${pad.l - 8}" y="${gy + 4}" text-anchor="end" class="tick">${fmt(f * maxY)}</text>`;
   }).join("");
-  const dots = byDay.map((p, i2) => `<circle cx="${x(i2).toFixed(1)}" cy="${y(p.cumulative).toFixed(1)}" r="3.5" fill="var(--series-1)"><title>${p.day}: ${comma(p.cumulative)}</title></circle>`).join("");
-  const xl = byDay.filter((_, i2) => i2 === 0 || i2 === byDay.length - 1 || byDay.length <= 5).map((p) => `<text x="${x(byDay.indexOf(p)).toFixed(1)}" y="${h - 10}" text-anchor="middle" class="tick">${p.day.slice(5)}</text>`).join("");
+  const dots = byDay.map((p, i2) => `<circle cx="${x(i2).toFixed(1)}" cy="${y(p.cumulative).toFixed(1)}" r="3.5" fill="var(--series-1)"><title>${esc2(p.day)}: ${comma(p.cumulative)}</title></circle>`).join("");
+  const xl = byDay.filter((_, i2) => i2 === 0 || i2 === byDay.length - 1 || byDay.length <= 5).map((p) => `<text x="${x(byDay.indexOf(p)).toFixed(1)}" y="${h - 10}" text-anchor="middle" class="tick">${esc2(p.day.slice(5))}</text>`).join("");
   return `<svg class="area-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Cumulative tokens saved by day" width="100%">${grid}
     <path d="${area}" fill="var(--series-1)" opacity="0.12"/><path d="${line}" fill="none" stroke="var(--series-1)" stroke-width="2"/>${dots}${xl}</svg>`;
 }
