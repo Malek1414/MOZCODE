@@ -79,11 +79,12 @@ export function computeMetrics(
 
 /** Format seconds as "1h 12m", "3m 20s", or "45s". */
 export function fmtDuration(sec: number): string {
-  if (sec < 60) return `${Math.round(sec)}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
-  const h = Math.floor(sec / 3600);
-  const m = Math.round((sec % 3600) / 60);
-  return `${h}h ${m}m`;
+  // Round to the displayed unit before splitting, so 119.6s is "2m 0s", not "1m 60s".
+  const s = Math.round(sec);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  const mins = Math.round(sec / 60);
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
 /** Format USD: $0.0123 for small, $12.34 otherwise. */

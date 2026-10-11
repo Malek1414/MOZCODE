@@ -99,3 +99,16 @@ describe("openInBrowser", () => {
     expect(uncaught).toBeUndefined();
   });
 });
+
+describe("fmtDuration", () => {
+  it("carries rounding into the next unit", async () => {
+    const { fmtDuration } = await import("../src/dashboard/metrics.js");
+    expect(fmtDuration(45.2)).toBe("45s");
+    expect(fmtDuration(59.6)).toBe("1m 0s");
+    expect(fmtDuration(119.6)).toBe("2m 0s");
+    expect(fmtDuration(200)).toBe("3m 20s");
+    expect(fmtDuration(3599.7)).toBe("1h 0m");
+    expect(fmtDuration(7170)).toBe("2h 0m");
+    expect(fmtDuration(4320)).toBe("1h 12m");
+  });
+});

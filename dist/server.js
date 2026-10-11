@@ -27073,11 +27073,11 @@ function computeMetrics(summary, _entries, a = DEFAULT_ASSUMPTIONS) {
   };
 }
 function fmtDuration(sec) {
-  if (sec < 60) return `${Math.round(sec)}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
-  const h = Math.floor(sec / 3600);
-  const m = Math.round(sec % 3600 / 60);
-  return `${h}h ${m}m`;
+  const s = Math.round(sec);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  const mins = Math.round(sec / 60);
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 function fmtUsd(v) {
   if (v > 0 && v < 1) return `$${v.toFixed(v < 0.01 ? 4 : 3)}`;
