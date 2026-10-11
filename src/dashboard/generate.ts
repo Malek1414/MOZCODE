@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
-import { loadEntries, summarize, mozcodeHome } from "../metering/store.js";
+import { loadEntries, summarize, mozcodeHome, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "../metering/store.js";
 import { renderDashboard } from "./render.js";
 
 function wrap(body: string): string {
@@ -24,8 +24,8 @@ export async function generateDashboard(): Promise<{ path: string; totalSaved: n
   const summary = summarize(await loadEntries());
   const html = wrap(renderDashboard(summary));
   const out = path.join(mozcodeHome(), "dashboard.html");
-  await fs.mkdir(mozcodeHome(), { recursive: true });
-  await fs.writeFile(out, html, "utf8");
+  await fs.mkdir(mozcodeHome(), { recursive: true, mode: PRIVATE_DIR_MODE });
+  await fs.writeFile(out, html, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   return { path: out, totalSaved: summary.totalSaved, calls: summary.calls };
 }
 

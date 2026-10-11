@@ -20,6 +20,12 @@ export function mozcodeHome(): string {
   return process.env.MOZCODE_HOME || path.join(os.homedir(), ".mozcode");
 }
 
+// The ledger, session pointers and dashboard list project paths and file
+// names, so keep them private to the user (ignored on Windows). Modes apply
+// only when a directory or file is created.
+export const PRIVATE_DIR_MODE = 0o700;
+export const PRIVATE_FILE_MODE = 0o600;
+
 function meteringDir(): string {
   return path.join(mozcodeHome(), "metering");
 }
@@ -37,7 +43,7 @@ export async function record(
   meta: SavingsMeta,
 ): Promise<void> {
   try {
-    await fs.mkdir(meteringDir(), { recursive: true });
+    await fs.mkdir(meteringDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
     const entry: MeteringEntry = {
       ts: new Date().toISOString(),
       session,
@@ -48,7 +54,7 @@ export async function record(
       actualTokens: meta.actualTokens,
       savedTokens: meta.savedTokens,
     };
-    await fs.appendFile(projectFile(project), JSON.stringify(entry) + "\n", "utf8");
+    await fs.appendFile(projectFile(project), JSON.stringify(entry) + "\n", { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   } catch {
     // Metering is best-effort; a failure here must not break a tool call.
   }
@@ -70,8 +76,8 @@ function sessionPointerFile(project: string): string {
  */
 export async function writeCurrentSession(project: string, session: string): Promise<void> {
   try {
-    await fs.mkdir(sessionsDir(), { recursive: true });
-    await fs.writeFile(sessionPointerFile(project), session, "utf8");
+    await fs.mkdir(sessionsDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
+    await fs.writeFile(sessionPointerFile(project), session, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   } catch {
     // Pointer is a convenience; the statusline falls back to the latest entry.
   }

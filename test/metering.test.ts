@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { record, loadEntries, summarize } from "../src/metering/store.js";
+import { record, loadEntries, summarize, writeCurrentSession } from "../src/metering/store.js";
 import { makeMeta } from "../src/tools/types.js";
 
 describe("metering store", () => {
@@ -14,6 +14,18 @@ describe("metering store", () => {
   afterEach(async () => {
     delete process.env.MOZCODE_HOME;
     await fs.rm(home, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === "win32")("creates the ledger and session pointer readable only by the user", async () => {
+    await record("/proj/a", "sess1", makeMeta("code_read", "a.ts", 1000, 100));
+    await writeCurrentSession("/proj/a", "sess1");
+    const mode = async (p: string) => (await fs.stat(p)).mode & 0o777;
+    expect(await mode(home)).toBe(0o700);
+    expect(await mode(join(home, "metering"))).toBe(0o700);
+    expect(await mode(join(home, "sessions"))).toBe(0o700);
+    for (const dir of ["metering", "sessions"]) {
+      for (const f of await fs.readdir(join(home, dir))) expect(await mode(join(home, dir, f))).toBe(0o600);
+    }
   });
 
   it("records and reads back savings entries", async () => {

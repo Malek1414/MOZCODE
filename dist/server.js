@@ -33313,6 +33313,8 @@ import * as crypto from "node:crypto";
 function mozcodeHome() {
   return process.env.MOZCODE_HOME || path5.join(os.homedir(), ".mozcode");
 }
+var PRIVATE_DIR_MODE = 448;
+var PRIVATE_FILE_MODE = 384;
 function meteringDir() {
   return path5.join(mozcodeHome(), "metering");
 }
@@ -33323,7 +33325,7 @@ function projectFile(project) {
 }
 async function record2(project, session, meta2) {
   try {
-    await fs7.mkdir(meteringDir(), { recursive: true });
+    await fs7.mkdir(meteringDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
     const entry = {
       ts: (/* @__PURE__ */ new Date()).toISOString(),
       session,
@@ -33334,7 +33336,7 @@ async function record2(project, session, meta2) {
       actualTokens: meta2.actualTokens,
       savedTokens: meta2.savedTokens
     };
-    await fs7.appendFile(projectFile(project), JSON.stringify(entry) + "\n", "utf8");
+    await fs7.appendFile(projectFile(project), JSON.stringify(entry) + "\n", { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   } catch {
   }
 }
@@ -33347,8 +33349,8 @@ function sessionPointerFile(project) {
 }
 async function writeCurrentSession(project, session) {
   try {
-    await fs7.mkdir(sessionsDir(), { recursive: true });
-    await fs7.writeFile(sessionPointerFile(project), session, "utf8");
+    await fs7.mkdir(sessionsDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
+    await fs7.writeFile(sessionPointerFile(project), session, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   } catch {
   }
 }
@@ -33800,8 +33802,8 @@ async function generateDashboard() {
   const summary = summarize(await loadEntries());
   const html = wrap(renderDashboard(summary));
   const out2 = path6.join(mozcodeHome(), "dashboard.html");
-  await fs8.mkdir(mozcodeHome(), { recursive: true });
-  await fs8.writeFile(out2, html, "utf8");
+  await fs8.mkdir(mozcodeHome(), { recursive: true, mode: PRIVATE_DIR_MODE });
+  await fs8.writeFile(out2, html, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   return { path: out2, totalSaved: summary.totalSaved, calls: summary.calls };
 }
 function openInBrowser(target) {
