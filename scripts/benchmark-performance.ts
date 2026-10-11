@@ -187,23 +187,28 @@ async function benchmarkDb(root: string): Promise<Record<string, unknown>> {
   }, 30);
   const result = await dbSchema(root, { path: databasePath });
 
+  // Naive full discovery is one table listing plus one table_xinfo per table;
+  // db_schema runs its four fixed metadata queries.
+  const naiveQueries = 1 + clinicalNames.length;
+  const mozQueries = 4;
+
   const tenTurnModeledSpeedup =
     (10 * ROUND_TRIP_MS + naiveTen.medianMs) / (ROUND_TRIP_MS + mozCold.medianMs);
   const wholeSchemaModeledSpeedup =
-    (69 * ROUND_TRIP_MS + naiveWhole.medianMs) / (ROUND_TRIP_MS + mozCold.medianMs);
+    (naiveQueries * ROUND_TRIP_MS + naiveWhole.medianMs) / (ROUND_TRIP_MS + mozCold.medianMs);
   const warmTenLocalSpeedup = naiveTen.medianMs / mozWarm.medianMs;
   const warmWholeLocalSpeedup = naiveWhole.medianMs / mozWarm.medianMs;
   const coldWholeLocalSpeedup = naiveWhole.medianMs / mozCold.medianMs;
 
   console.log("── DATABASE DISCOVERY (68-table synthetic clinical schema) ──");
   console.log(`Measured local SQL only, 10 discovery queries: ${fmt(naiveTen)}`);
-  console.log(`Measured local SQL only, complete schema (69 queries): ${fmt(naiveWhole)}`);
-  console.log(`Measured db_schema cold (4 metadata queries + render): ${fmt(mozCold)}`);
+  console.log(`Measured local SQL only, complete schema (${naiveQueries} queries): ${fmt(naiveWhole)}`);
+  console.log(`Measured db_schema cold (${mozQueries} metadata queries + render): ${fmt(mozCold)}`);
   console.log(`Measured db_schema cached: ${fmt(mozWarm)}`);
-  console.log(`Measured metadata query-count reduction: 69 → 4 (${(69 / 4).toFixed(2)}×)`);
+  console.log(`Metadata query count (by construction, not timed): ${naiveQueries} → ${mozQueries} (${(naiveQueries / mozQueries).toFixed(2)}×)`);
   console.log(`Measured local wall-clock speedup, cached: ${warmTenLocalSpeedup.toFixed(2)}× vs 10 queries; ${warmWholeLocalSpeedup.toFixed(2)}× vs full discovery`);
   console.log(`Measured local wall-clock speedup, cold: ${coldWholeLocalSpeedup.toFixed(2)}× vs full discovery`);
-  console.log(`Measured agent tool-call reduction: 10 → 1 (10.00×), or 69 → 1 for the full schema`);
+  console.log(`Agent tool calls (by construction, not timed): 10 → 1 (10.00×), or ${naiveQueries} → 1 for the full schema`);
   console.log(`MODELED 3.5s agent-turn speedup: ${tenTurnModeledSpeedup.toFixed(2)}× (10-turn task), ${wholeSchemaModeledSpeedup.toFixed(2)}× (full schema)`);
   console.log(`Measured schema payload reduction: ${result.meta.baselineTokens.toLocaleString()} → ${result.meta.actualTokens.toLocaleString()} tokens (${(100 * result.meta.savedTokens / result.meta.baselineTokens).toFixed(1)}%)`);
   console.log("Caveat: local SQLite queries are already sub-millisecond; the agent-loop win comes from eliminating model/tool round trips.\n");
@@ -213,7 +218,7 @@ async function benchmarkDb(root: string): Promise<Record<string, unknown>> {
     naiveWhole,
     mozCold,
     mozWarm,
-    queryCountSpeedup: 69 / 4,
+    queryCountSpeedup: naiveQueries / mozQueries,
     warmTenLocalSpeedup,
     warmWholeLocalSpeedup,
     coldWholeLocalSpeedup,
@@ -230,10 +235,10 @@ async function benchmarkCode(root: string): Promise<Record<string, unknown>> {
   const rel = "node_modules/zod/src/v4/core/schemas.ts";
   clearFileCache();
   const analysis = await analyzeFile(target);
-  const symbol = analysis.symbols
-    .filter((item) => item.depth === 0)
-    .reduce((largest, item) =>
-      item.endIndex - item.startIndex > largest.endIndex - largest.startIndex ? item : largest);
+  const topLevel = analysis.symbols.filter((item) => item.depth === 0);
+  if (topLevel.length === 0) throw new Error(`No top-level symbols found in ${rel}; is zod installed (npm ci)?`);
+  const symbol = topLevel.reduce((largest, item) =>
+    item.endIndex - item.startIndex > largest.endIndex - largest.startIndex ? item : largest);
 
   // Warm tree-sitter's runtime/grammar. clearFileCache does not unload the grammar.
   clearFileCache();

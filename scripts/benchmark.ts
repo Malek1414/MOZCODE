@@ -7,7 +7,7 @@
  * explicitly, so a plain `npm run benchmark:tokens` cannot inflate the user's
  * real ~/.mozcode dashboard and status line with synthetic "bench:corpus" rows.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { codeOutline } from "../src/tools/outline.js";
 import { codeRead } from "../src/tools/read.js";
@@ -59,7 +59,18 @@ async function main() {
     { name: "mozcode/test", dir: join(root, "test") },
   ];
 
+  const missing = corpora.filter((c) => !existsSync(c.dir));
+  if (missing.length > 0) {
+    // A silently smaller corpus would change every headline percentage.
+    console.error(`Benchmark corpus missing: ${missing.map((c) => `${c.name} (${c.dir})`).join(", ")}. Run npm ci first.`);
+    process.exit(1);
+  }
+
   const files = corpora.flatMap((c) => walk(c.dir).map((f) => ({ ...c, file: f })));
+  if (files.length === 0) {
+    console.error("Benchmark corpus is empty; nothing to measure.");
+    process.exit(1);
+  }
   console.log(`Corpus: ${files.length} real source files`);
   console.log(
     RECORD
