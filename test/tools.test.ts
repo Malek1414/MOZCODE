@@ -177,6 +177,16 @@ describe("code_edit", () => {
     expect(same.text).not.toContain("Warning");
   });
 
+  it("splices correctly after non-ASCII text (spans are UTF-16, not UTF-8 bytes)", async () => {
+    // web-tree-sitter reports UTF-16 code-unit offsets for JS strings; guard
+    // against a runtime upgrade that switches to byte offsets.
+    const src = "// café — 🎉 naïve\nexport function foo(): number {\n  return 1;\n}\n\nexport function bar(): number {\n  return 2;\n}\n";
+    await fs.writeFile(tmp, src);
+    const r = await codeEdit(tmp, "x.ts", "foo", "function foo(): number {\n  return 42;\n}");
+    expect(r.degraded).toBe(false);
+    expect(await fs.readFile(tmp, "utf8")).toBe(src.replace("return 1;", "return 42;"));
+  });
+
   it("refuses to overwrite sibling declarators in one statement", async () => {
     await fs.writeFile(tmp, "const a = 1, b = 2;\nexport const c = 3;\n");
     const before = await fs.readFile(tmp, "utf8");
