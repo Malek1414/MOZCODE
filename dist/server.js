@@ -34465,8 +34465,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return textResult(r.text);
       }
       case "moz_savings": {
-        const all = summarize(await loadEntries());
-        const session = summarize((await loadEntries()).filter((e) => e.session === SESSION));
+        const entries = await loadEntries();
+        const all = summarize(entries);
+        const session = summarize(entries.filter((e) => e.session === SESSION));
         return textResult(
           `MOZCODE estimated savings (illustrative, not a billing figure):
 \u2022 This session: ${session.totalSaved.toLocaleString()} tokens saved across ${session.calls} calls (${session.avgReductionPct.toFixed(0)}% avg reduction).

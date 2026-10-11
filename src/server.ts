@@ -297,8 +297,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return textResult(r.text);
       }
       case "moz_savings": {
-        const all = summarize(await loadEntries());
-        const session = summarize((await loadEntries()).filter((e) => e.session === SESSION));
+        // One read of the ledger: it holds every project's all-time history.
+        const entries = await loadEntries();
+        const all = summarize(entries);
+        const session = summarize(entries.filter((e) => e.session === SESSION));
         return textResult(
           `MOZCODE estimated savings (illustrative, not a billing figure):\n` +
             `• This session: ${session.totalSaved.toLocaleString()} tokens saved across ${session.calls} calls (${session.avgReductionPct.toFixed(0)}% avg reduction).\n` +
