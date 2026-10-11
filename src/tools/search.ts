@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { RE2JS } from "re2js";
 import { languageForPath } from "../ast/languages.js";
 import { type Symbol } from "../ast/engine.js";
 import { analyzeFile, readCachedSource } from "../ast/file-cache.js";
@@ -15,11 +16,36 @@ interface RawMatch {
   offset: number; // char offset of the first match on the line
 }
 
-function buildRegex(query: string): RegExp {
+interface CompiledQuery {
+  rx: RE2JS;
+  /** Set when the query was searched as a literal string instead of a regex. */
+  note?: string;
+}
+
+/**
+ * Compile the model-supplied query with RE2 (linear-time matching), not V8's
+ * backtracking RegExp: a pattern such as `(a+)+$` would otherwise freeze the
+ * single-threaded stdio server for seconds or minutes per line. RE2 has no
+ * lookaround or backreferences, so those queries (like invalid ones) are
+ * searched as a literal string, and the result says so.
+ */
+export function compileQuery(query: string): CompiledQuery {
   try {
-    return new RegExp(query, "g");
+    return { rx: RE2JS.compile(query) };
   } catch {
-    return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+    let validJs = false;
+    try {
+      new RegExp(query);
+      validJs = true;
+    } catch {
+      // Not a regex in either dialect: a literal search is the intent.
+    }
+    return {
+      rx: RE2JS.compile(RE2JS.quote(query)),
+      note: validJs
+        ? "Lookaround, backreferences and \\u escapes are not supported (linear-time regex engine), so the query was searched as a literal string."
+        : undefined,
+    };
   }
 }
 
@@ -39,7 +65,7 @@ export async function codeSearch(
   query: string,
   pathGlob?: string,
 ): Promise<ToolResult> {
-  const rx = buildRegex(query);
+  const { rx, note } = compileQuery(query);
   const files = await listSourceFiles(root);
   const matches: RawMatch[] = [];
 
@@ -54,10 +80,9 @@ export async function codeSearch(
     let offset = 0;
     const lines = source.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      rx.lastIndex = 0;
-      const match = rx.exec(lines[i]);
-      if (match) {
-        matches.push({ file, line: i + 1, text: lines[i].trim(), offset: offset + match.index });
+      const m = rx.matcher(lines[i]);
+      if (m.find()) {
+        matches.push({ file, line: i + 1, text: lines[i].trim(), offset: offset + m.start() });
         if (matches.length >= MAX_MATCHES) break;
       }
       offset += lines[i].length + 1; // + newline
@@ -72,7 +97,7 @@ export async function codeSearch(
   const baseline = estimateTokens(baselineText) || 1;
 
   if (matches.length === 0) {
-    const text = `No matches for /${query}/${pathGlob ? ` in ${pathGlob}` : ""}.`;
+    const text = `No matches for /${query}/${pathGlob ? ` in ${pathGlob}` : ""}.${note ? ` ${note}` : ""}`;
     return { text, degraded: false, meta: makeMeta("code_search", undefined, baseline, estimateTokens(text)) };
   }
 
@@ -124,7 +149,7 @@ export async function codeSearch(
   const header = truncated
     ? `${MAX_MATCHES}+ matches for /${query}/ (TRUNCATED at ${MAX_MATCHES}; results are incomplete, narrow the query or path_glob), grouped by symbol:`
     : `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
-  const text = `${header}\n${blocks.join("\n")}`;
+  const text = `${header}\n${note ? `${note}\n` : ""}${blocks.join("\n")}`;
   return {
     text,
     degraded: false,

@@ -34,6 +34,7 @@
     "@modelcontextprotocol/sdk": "^1.19.1",
     "gpt-tokenizer": "^3.4.0",
     "pg": "^8.22.0",
+    "re2js": "^2.8.6",
     "tree-sitter-wasms": "^0.1.12",
     "web-tree-sitter": "^0.25.10"
   },
