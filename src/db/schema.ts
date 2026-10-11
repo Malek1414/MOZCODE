@@ -190,6 +190,9 @@ async function querySqliteNative(filePath: string): Promise<[Row[], Row[], Row[]
 async function querySqliteCli(filePath: string, sql: string): Promise<Row[]> {
   const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", filePath, sql], {
     maxBuffer: 16 * 1024 * 1024,
+    // A locked or huge database must not hold the tool call open forever.
+    timeout: 10_000,
+    killSignal: "SIGKILL",
   });
   return stdout.trim() ? JSON.parse(stdout) as Row[] : [];
 }
@@ -423,10 +426,19 @@ async function inspectPostgres(connectionString: string, source: string): Promis
   });
   await client.connect();
   try {
+    // Defense in depth for a tool advertised as read-only: run the catalog
+    // queries in a READ ONLY transaction with server-side limits. query_timeout
+    // only stops the client waiting; statement_timeout makes the server cancel.
+    // SET LOCAL (not startup parameters) so this also works through poolers
+    // such as PgBouncer in transaction mode.
+    await client.query("BEGIN READ ONLY");
+    await client.query("SET LOCAL statement_timeout = 10000");
+    await client.query("SET LOCAL lock_timeout = 5000");
     const tables = await client.query(POSTGRES_TABLES_SQL);
     const columns = await client.query(POSTGRES_COLUMNS_SQL);
     const fks = await client.query(POSTGRES_FKS_SQL);
     const indexes = await client.query(POSTGRES_INDEXES_SQL);
+    await client.query("ROLLBACK");
     return postgresSnapshot(source, tables.rows, columns.rows, fks.rows, indexes.rows);
   } finally {
     await client.end();

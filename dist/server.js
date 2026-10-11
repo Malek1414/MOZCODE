@@ -32980,7 +32980,10 @@ async function querySqliteNative(filePath) {
 }
 async function querySqliteCli(filePath, sql) {
   const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", filePath, sql], {
-    maxBuffer: 16 * 1024 * 1024
+    maxBuffer: 16 * 1024 * 1024,
+    // A locked or huge database must not hold the tool call open forever.
+    timeout: 1e4,
+    killSignal: "SIGKILL"
   });
   return stdout.trim() ? JSON.parse(stdout) : [];
 }
@@ -33189,10 +33192,14 @@ async function inspectPostgres(connectionString, source) {
   });
   await client.connect();
   try {
+    await client.query("BEGIN READ ONLY");
+    await client.query("SET LOCAL statement_timeout = 10000");
+    await client.query("SET LOCAL lock_timeout = 5000");
     const tables = await client.query(POSTGRES_TABLES_SQL);
     const columns = await client.query(POSTGRES_COLUMNS_SQL);
     const fks = await client.query(POSTGRES_FKS_SQL);
     const indexes = await client.query(POSTGRES_INDEXES_SQL);
+    await client.query("ROLLBACK");
     return postgresSnapshot(source, tables.rows, columns.rows, fks.rows, indexes.rows);
   } finally {
     await client.end();

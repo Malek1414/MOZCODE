@@ -102,3 +102,14 @@ describe("db_schema", () => {
       .rejects.toThrow(/must be an environment variable name/);
   });
 });
+
+// Opt-in: point MOZCODE_TEST_POSTGRES_URL at a disposable database to exercise
+// the real pg path (read-only transaction with server-side timeouts).
+describe.skipIf(!process.env.MOZCODE_TEST_POSTGRES_URL)("db_schema against PostgreSQL", () => {
+  it("introspects inside a read-only transaction", async () => {
+    clearDbSchemaCache();
+    const r = await dbSchema(tmpdir(), { connectionEnv: "MOZCODE_TEST_POSTGRES_URL", refresh: true });
+    expect(r.text).toMatch(/postgres schema: \d+ tables/);
+    expect(r.text).toContain("(credentials hidden)");
+  });
+});
