@@ -1,5 +1,5 @@
 import { resolveSymbol } from "../ast/engine.js";
-import { analyzeFile } from "../ast/file-cache.js";
+import { analyzeFile, sourceTokensOf } from "../ast/file-cache.js";
 import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 import { renderOutline } from "./outline.js";
@@ -68,8 +68,9 @@ function contextLinesOf(raw: unknown): number {
 }
 
 export async function codeRead(absPath: string, relPath: string, opts: ReadOptions = {}): Promise<ToolResult> {
-  const { source, language, symbols, hasError, timedOut } = await analyzeFile(absPath);
-  const baseline = estimateTokens(source);
+  const analysis = await analyzeFile(absPath);
+  const { source, language, symbols, hasError, timedOut } = analysis;
+  const baseline = sourceTokensOf(analysis);
   const context = contextLinesOf(opts.contextLines);
 
   // Unsupported language, or too large to parse in time -> plain (numbered) read.

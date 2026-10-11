@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { extractSymbols, type ParseResult } from "./engine.js";
 import { languageForPath, type LanguageId } from "./languages.js";
+import { estimateTokens } from "../util/tokens.js";
 
 export interface FileAnalysis extends ParseResult {
   source: string;
@@ -83,6 +84,24 @@ export async function analyzeFile(filePath: string): Promise<FileAnalysis> {
     });
   }
   return entry.analysis;
+}
+
+const sourceTokens = new WeakMap<FileAnalysis, number>();
+
+/**
+ * Token count of the whole source (the counterfactual baseline for metering),
+ * computed once per file version. BPE-tokenizing the full file on every call
+ * dominated warm code_read/code_outline latency and blocks the event loop on
+ * large files. The analysis object is reused until the file changes, so it is
+ * a safe key.
+ */
+export function sourceTokensOf(analysis: FileAnalysis): number {
+  let n = sourceTokens.get(analysis);
+  if (n === undefined) {
+    n = estimateTokens(analysis.source);
+    sourceTokens.set(analysis, n);
+  }
+  return n;
 }
 
 /** Invalidate after an in-process edit; external edits are detected by stat metadata. */

@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { extractSymbols, resolveSymbol, type Symbol } from "../ast/engine.js";
-import { analyzeFile, invalidateFile } from "../ast/file-cache.js";
+import { analyzeFile, invalidateFile, sourceTokensOf } from "../ast/file-cache.js";
 import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 import { renderOutline } from "./outline.js";
@@ -30,8 +30,9 @@ export async function codeEdit(
   symbolName: string,
   newSource: string,
 ): Promise<ToolResult> {
-  const { source, language, symbols, hasError: hadError, timedOut } = await analyzeFile(absPath);
-  const baseline = estimateTokens(source); // the whole-file re-read this edit avoids
+  const analysis = await analyzeFile(absPath);
+  const { source, language, symbols, hasError: hadError, timedOut } = analysis;
+  const baseline = sourceTokensOf(analysis); // the whole-file re-read this edit avoids
 
   if (!language || timedOut) {
     const why = language ? "the file is too large to parse in time" : "unsupported language";
