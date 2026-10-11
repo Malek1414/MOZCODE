@@ -120,7 +120,10 @@ export async function codeSearch(
     blocks.push(`${rel}:\n${parts.join("\n")}`);
   }
 
-  const header = `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
+  const truncated = matches.length >= MAX_MATCHES;
+  const header = truncated
+    ? `${MAX_MATCHES}+ matches for /${query}/ (TRUNCATED at ${MAX_MATCHES}; results are incomplete, narrow the query or path_glob), grouped by symbol:`
+    : `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
   const text = `${header}\n${blocks.join("\n")}`;
   return {
     text,

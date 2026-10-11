@@ -26454,7 +26454,8 @@ ${lines.join("\n")}`);
     blocks.push(`${rel}:
 ${parts2.join("\n")}`);
   }
-  const header = `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
+  const truncated = matches.length >= MAX_MATCHES;
+  const header = truncated ? `${MAX_MATCHES}+ matches for /${query}/ (TRUNCATED at ${MAX_MATCHES}; results are incomplete, narrow the query or path_glob), grouped by symbol:` : `${matches.length} match${matches.length > 1 ? "es" : ""} for /${query}/, grouped by symbol:`;
   const text = `${header}
 ${blocks.join("\n")}`;
   return {

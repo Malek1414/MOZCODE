@@ -39,4 +39,11 @@ describe("code_search path_glob", () => {
     const none = await codeSearch(root, "export async function codeSearch", "scripts/**/*.ts");
     expect(none.text).toContain("No matches");
   });
+
+  it("flags a result cut off at the match cap as truncated", async () => {
+    const r = await codeSearch(root, "\\S", "src/**/*.ts");
+    expect(r.text).toMatch(/^200\+ matches .*TRUNCATED/);
+    const small = await codeSearch(root, "export async function codeSearch", "src/**/*.ts");
+    expect(small.text).not.toContain("TRUNCATED");
+  });
 });
