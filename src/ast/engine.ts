@@ -117,8 +117,11 @@ function handleTsNode(node: Node, source: string, out: Symbol[]): void {
     case "type_alias_declaration": {
       const name = nameFromField(node);
       if (name) {
-        const eq = source.indexOf("=", node.startIndex);
-        const sig = source.slice(node.startIndex, eq > -1 ? eq : node.endIndex).trim();
+        // Cut before the aliased type, not at the first "=": generic defaults
+        // (type Box<T = string> = ...) contain one too.
+        const value = node.childForFieldName("value");
+        const head = source.slice(node.startIndex, value ? value.startIndex : node.endIndex);
+        const sig = head.replace(/\s*=\s*$/, "").trim();
         out.push(mkSymbol(node, name, "type", sig, null, 0));
       }
       return;

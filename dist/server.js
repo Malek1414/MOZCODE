@@ -24737,8 +24737,9 @@ function handleTsNode(node, source, out2) {
     case "type_alias_declaration": {
       const name2 = nameFromField(node);
       if (name2) {
-        const eq = source.indexOf("=", node.startIndex);
-        const sig = source.slice(node.startIndex, eq > -1 ? eq : node.endIndex).trim();
+        const value = node.childForFieldName("value");
+        const head = source.slice(node.startIndex, value ? value.startIndex : node.endIndex);
+        const sig = head.replace(/\s*=\s*$/, "").trim();
         out2.push(mkSymbol(node, name2, "type", sig, null, 0));
       }
       return;

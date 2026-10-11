@@ -49,6 +49,15 @@ describe("TypeScript extraction", () => {
   });
 });
 
+describe("TypeScript type aliases", () => {
+  it("keeps generic defaults in the signature", async () => {
+    const src = "export type Box<T = string, U extends object = {}> = { value: T; meta: U };\ntype Id = string;\n";
+    const { symbols } = await extractSymbols(src, "typescript");
+    expect(symbols.find((s) => s.name === "Box")?.signature).toBe("type Box<T = string, U extends object = {}>");
+    expect(symbols.find((s) => s.name === "Id")?.signature).toBe("type Id");
+  });
+});
+
 describe("Python extraction", () => {
   const src = read("sample.py");
 
