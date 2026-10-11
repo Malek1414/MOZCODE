@@ -123,6 +123,23 @@ describe("statusline", () => {
     expect(allTimePart).toContain("11k tokens");
   });
 
+  it("shows today's savings across projects while the current session has none", async () => {
+    await appendEntry(home, "/proj/other", "sess-elsewhere", 3000);
+    const out = plain((await runStatusline(home, project)).stdout);
+    const [first, allTime] = out.split("│");
+    expect(first).toContain("today:");
+    expect(first).toContain("3.0k tokens");
+    expect(allTime).toContain("3.0k tokens");
+  });
+
+  it("switches to the session segment once the session has saved tokens", async () => {
+    await appendEntry(home, "/proj/other", "sess-elsewhere", 3000);
+    await appendEntry(home, project, session, 1000);
+    const first = plain((await runStatusline(home, project)).stdout).split("│")[0];
+    expect(first).toContain("session:");
+    expect(first).toContain("1.0k tokens");
+  });
+
   it("keeps the session segment when the cwd moves into a subdirectory", async () => {
     await appendEntry(home, project, session, 2000);
     const viaProjectDir = plain((await runStatusline(home, `${project}/src/deep`, project)).stdout);

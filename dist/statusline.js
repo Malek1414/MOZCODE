@@ -38,9 +38,14 @@ function isMeteringEntry(v) {
 // src/metering/rollup.ts
 import { promises as fs2 } from "node:fs";
 import * as path2 from "node:path";
-var VERSION = 1;
+var VERSION = 2;
 function rollupPath() {
   return path2.join(mozcodeHome(), "cache", "statusline-rollup.json");
+}
+function localDay(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 function emptyTotals() {
   return { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
@@ -82,6 +87,9 @@ function totalsToSummary(t, projects = 0) {
     bySession: []
   };
 }
+function emptyProject() {
+  return { total: emptyTotals(), sessions: {}, days: {}, latestTs: "", latestSession: "" };
+}
 function addLine(projects, line) {
   if (!line.trim()) return;
   let parsed;
@@ -92,9 +100,10 @@ function addLine(projects, line) {
   }
   if (!isMeteringEntry(parsed)) return;
   const e = parsed;
-  const p = projects[e.project] ??= { total: emptyTotals(), sessions: {}, latestTs: "", latestSession: "" };
+  const p = projects[e.project] ??= emptyProject();
   addEntry(p.total, e);
   addEntry(p.sessions[e.session] ??= emptyTotals(), e);
+  addEntry(p.days[localDay(e.ts)] ??= emptyTotals(), e);
   if (e.ts > p.latestTs) {
     p.latestTs = e.ts;
     p.latestSession = e.session;
@@ -171,9 +180,10 @@ async function loadRollup() {
   const out = {};
   for (const file of Object.values(files)) {
     for (const [project, p] of Object.entries(file.projects)) {
-      const into = out[project] ??= { total: emptyTotals(), sessions: {}, latestTs: "", latestSession: "" };
+      const into = out[project] ??= emptyProject();
       mergeTotals(into.total, p.total);
       for (const [session, t] of Object.entries(p.sessions)) mergeTotals(into.sessions[session] ??= emptyTotals(), t);
+      for (const [day, t] of Object.entries(p.days ?? {})) mergeTotals(into.days[day] ??= emptyTotals(), t);
       if (p.latestTs > into.latestTs) {
         into.latestTs = p.latestTs;
         into.latestSession = p.latestSession;
@@ -288,11 +298,18 @@ async function main() {
   const project = await resolveProject(candidates, projects);
   const all = { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
   for (const p of Object.values(projects)) mergeTotals(all, p.total);
-  const forProject = projects[project];
-  let sessionId = await readCurrentSession(project);
-  if (!sessionId && forProject?.latestSession) sessionId = forProject.latestSession;
-  const sessionTotals = sessionId ? forProject?.sessions[sessionId] : void 0;
-  const line = `\u26A1 MOZCODE est. session: ${segment(sessionTotals)}  \u2502  all-time: ${segment(all)}`;
+  const sessionId = await readCurrentSession(project);
+  const sessionTotals = sessionId ? projects[project]?.sessions[sessionId] : void 0;
+  let first;
+  if (sessionTotals && sessionTotals.calls > 0) {
+    first = `session: ${segment(sessionTotals)}`;
+  } else {
+    const today = { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
+    const day = localDay((/* @__PURE__ */ new Date()).toISOString());
+    for (const p of Object.values(projects)) if (p.days?.[day]) mergeTotals(today, p.days[day]);
+    first = `today: ${segment(today)}`;
+  }
+  const line = `\u26A1 MOZCODE est. ${first}  \u2502  all-time: ${segment(all)}`;
   process.stdout.write(blue(line));
 }
 main().catch(() => {

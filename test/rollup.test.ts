@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadRollup, rollupPath } from "../src/metering/rollup.js";
+import { loadRollup, localDay, rollupPath } from "../src/metering/rollup.js";
 
 let home: string;
 let ledger: string;
@@ -36,6 +36,27 @@ describe("metering rollup", () => {
     expect(r["/p"].sessions.a.saved).toBe(110);
     expect(r["/p"].sessions.a.tools.code_edit).toEqual([1, 1, 100]);
     expect(r["/p"].latestSession).toBe("b");
+  });
+
+  it("keeps per-day totals keyed by the local calendar day", async () => {
+    const d1 = "2026-10-01T12:00:00.000Z";
+    const d2 = "2026-10-02T12:00:00.000Z";
+    await fs.writeFile(ledger, line("a", 10, d1) + line("b", 5, d1) + line("b", 7, d2));
+    const r = await loadRollup();
+    expect(r["/p"].days[localDay(d1)].saved).toBe(15);
+    expect(r["/p"].days[localDay(d1)].calls).toBe(2);
+    expect(r["/p"].days[localDay(d2)].saved).toBe(7);
+  });
+
+  it("rebuilds a rollup written by an older version", async () => {
+    await fs.writeFile(ledger, line("a", 10));
+    await fs.mkdir(join(home, "cache"), { recursive: true });
+    // A v1 rollup claims the whole file is consumed but has no per-day totals.
+    const size = (await fs.stat(ledger)).size;
+    await fs.writeFile(rollupPath(), JSON.stringify({ version: 1, files: { "p-000000000000.jsonl": { dev: 0, ino: 0, offset: size, projects: {} } } }));
+    const r = await loadRollup();
+    expect(r["/p"].total.saved).toBe(10);
+    expect(Object.keys(r["/p"].days)).toHaveLength(1);
   });
 
   it("waits for a partially written record instead of losing it", async () => {

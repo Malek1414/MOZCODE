@@ -33862,7 +33862,7 @@ function summarize(entries, topFiles2 = 15) {
 }
 
 // src/version.ts
-var VERSION = "0.3.0";
+var VERSION = "0.4.0";
 
 // src/util/containment.ts
 import { promises as fs8 } from "node:fs";

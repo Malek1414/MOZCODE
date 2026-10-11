@@ -34,6 +34,8 @@ export interface Totals {
 export interface ProjectRollup {
   total: Totals;
   sessions: Record<string, Totals>;
+  /** Local calendar day (YYYY-MM-DD) -> totals, so the status line can show "today". */
+  days: Record<string, Totals>;
   /** Session of the most recent entry (first one recorded on a timestamp tie). */
   latestTs: string;
   latestSession: string;
@@ -48,14 +50,22 @@ interface FileRollup {
 }
 
 interface RollupState {
-  version: 1;
+  version: 2;
   files: Record<string, FileRollup>;
 }
 
-const VERSION = 1;
+// v2 added per-day totals; an older rollup is rebuilt from the ledger.
+const VERSION = 2;
 
 export function rollupPath(): string {
   return path.join(mozcodeHome(), "cache", "statusline-rollup.json");
+}
+
+/** The local calendar day of an ISO timestamp, as YYYY-MM-DD. */
+export function localDay(ts: string): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function emptyTotals(): Totals {
@@ -105,6 +115,10 @@ export function totalsToSummary(t: Totals, projects = 0): Summary {
   };
 }
 
+function emptyProject(): ProjectRollup {
+  return { total: emptyTotals(), sessions: {}, days: {}, latestTs: "", latestSession: "" };
+}
+
 function addLine(projects: Record<string, ProjectRollup>, line: string): void {
   if (!line.trim()) return;
   let parsed: unknown;
@@ -115,9 +129,10 @@ function addLine(projects: Record<string, ProjectRollup>, line: string): void {
   }
   if (!isMeteringEntry(parsed)) return;
   const e = parsed;
-  const p = (projects[e.project] ??= { total: emptyTotals(), sessions: {}, latestTs: "", latestSession: "" });
+  const p = (projects[e.project] ??= emptyProject());
   addEntry(p.total, e);
   addEntry((p.sessions[e.session] ??= emptyTotals()), e);
+  addEntry((p.days[localDay(e.ts)] ??= emptyTotals()), e);
   if (e.ts > p.latestTs) {
     p.latestTs = e.ts;
     p.latestSession = e.session;
@@ -207,9 +222,10 @@ export async function loadRollup(): Promise<Record<string, ProjectRollup>> {
   const out: Record<string, ProjectRollup> = {};
   for (const file of Object.values(files)) {
     for (const [project, p] of Object.entries(file.projects)) {
-      const into = (out[project] ??= { total: emptyTotals(), sessions: {}, latestTs: "", latestSession: "" });
+      const into = (out[project] ??= emptyProject());
       mergeTotals(into.total, p.total);
       for (const [session, t] of Object.entries(p.sessions)) mergeTotals((into.sessions[session] ??= emptyTotals()), t);
+      for (const [day, t] of Object.entries(p.days ?? {})) mergeTotals((into.days[day] ??= emptyTotals()), t);
       if (p.latestTs > into.latestTs) {
         into.latestTs = p.latestTs;
         into.latestSession = p.latestSession;

@@ -6,7 +6,7 @@
 //
 // All figures are ESTIMATES against a naive-tool counterfactual — never billing.
 import { readCurrentSession } from "./metering/store.js";
-import { loadRollup, mergeTotals, totalsToSummary, type ProjectRollup, type Totals } from "./metering/rollup.js";
+import { loadRollup, localDay, mergeTotals, totalsToSummary, type ProjectRollup, type Totals } from "./metering/rollup.js";
 import { computeMetrics, fmtUsd, fmtDuration } from "./dashboard/metrics.js";
 import * as path from "node:path";
 
@@ -92,15 +92,23 @@ async function main(): Promise<void> {
   const all: Totals = { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
   for (const p of Object.values(projects)) mergeTotals(all, p.total);
 
-  // "This session" = the active metering session for this project. The server
-  // publishes it on startup; if that's missing, fall back to the session of the
-  // most recent entry recorded for this project.
-  const forProject = projects[project];
-  let sessionId = await readCurrentSession(project);
-  if (!sessionId && forProject?.latestSession) sessionId = forProject.latestSession;
-  const sessionTotals = sessionId ? forProject?.sessions[sessionId] : undefined;
+  // "This session" = the active metering session for this project, which the
+  // server publishes on startup. Until that session has made a MOZCODE call, a
+  // $0.00 session segment says nothing, so show today's savings across every
+  // project instead.
+  const sessionId = await readCurrentSession(project);
+  const sessionTotals = sessionId ? projects[project]?.sessions[sessionId] : undefined;
+  let first: string;
+  if (sessionTotals && sessionTotals.calls > 0) {
+    first = `session: ${segment(sessionTotals)}`;
+  } else {
+    const today: Totals = { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
+    const day = localDay(new Date().toISOString());
+    for (const p of Object.values(projects)) if (p.days?.[day]) mergeTotals(today, p.days[day]);
+    first = `today: ${segment(today)}`;
+  }
 
-  const line = `⚡ MOZCODE est. session: ${segment(sessionTotals)}  │  all-time: ${segment(all)}`;
+  const line = `⚡ MOZCODE est. ${first}  │  all-time: ${segment(all)}`;
   process.stdout.write(blue(line));
 }
 
