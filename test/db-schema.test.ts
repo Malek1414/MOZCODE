@@ -86,7 +86,7 @@ describe("db_schema", () => {
   });
 
   it("refuses an env var that does not hold a PostgreSQL URL without echoing it", async () => {
-    const secret = "sk-ant-not-a-database-0123456789";
+    const secret = "fake-secret-value-not-a-db-url-0123456789";
     process.env.MOZCODE_TEST_SECRET = secret;
     try {
       const attempt = dbSchema(dir, { connectionEnv: "MOZCODE_TEST_SECRET" });
