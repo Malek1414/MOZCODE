@@ -1,4 +1,24 @@
-# MOZCODE
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/banner-dark.svg">
+  <img alt="MOZCODE: a pixel mosquito with flapping wings dipping its proboscis into a pair of code braces for one small sip" src="assets/readme/banner-light.svg" width="100%">
+</picture>
+</p>
+
+<p align="center">
+  <a href="#install-local-no-account"><b>Install</b></a> &nbsp;·&nbsp;
+  <a href="#the-tools"><b>Tools</b></a> &nbsp;·&nbsp;
+  <a href="#the-savings-dashboard"><b>Dashboard</b></a> &nbsp;·&nbsp;
+  <a href="docs/superpowers/specs/2026-07-24-mozcode-design.md"><b>Design spec</b></a>
+</p>
+
+<p align="center">
+  <img alt="TypeScript 5" src="https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white">
+  <img alt="Node.js 22.12+" src="https://img.shields.io/badge/Node.js-22.12%2B-5fa04e?style=flat-square&logo=nodedotjs&logoColor=white">
+  <img alt="MCP over stdio" src="https://img.shields.io/badge/MCP-local_stdio-0b8a96?style=flat-square">
+  <img alt="tree-sitter" src="https://img.shields.io/badge/tree--sitter-WASM_grammars-6e7781?style=flat-square">
+  <img alt="Claude Code and Codex plugin" src="https://img.shields.io/badge/plugin-Claude_Code_+_Codex-d97757?style=flat-square">
+</p>
 
 **A symbol-level MCP server for Claude Code, Codex, and OpenAI models.** MOZCODE
 returns the *symbol you asked for* instead of the whole file, so an agentic coding loop spends far fewer input
@@ -8,50 +28,58 @@ spans so the model never re-reads a file after editing it, and meters the estima
 savings to a local dashboard.
 
 Everything runs **locally**. There is no account, no proxy, and no server that
-receives your code — the MCP server is a local stdio process.
+receives your code: the MCP server is a local stdio process.
 
 > **Provenance.** MOZCODE is a clean-room, open-source implementation designed from a
 > public technical teardown of [WOZCODE](https://wozcode.com) (Woz, YC W25). No
 > WOZCODE source, assets, or branding are used. It reconstructs a well-known public
-> technique — tree-sitter AST extraction + a local MCP server — from first
+> technique (tree-sitter AST extraction + a local MCP server) from first
 > principles. Not affiliated with Woz. MIT-licensed.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/divider-dark.svg">
+  <img alt="" src="assets/readme/divider-light.svg" width="100%">
+</picture>
 
 ## Why it saves tokens
 
 In an agentic loop, the accumulated conversation is re-sent on every turn, so a
 file read into context at turn 3 is paid for again at turns 4, 5, 6… until
 compaction. Returning *less text per tool call* therefore compounds across the
-session. MOZCODE attacks bytes-per-tool-call:
+session. MOZCODE attacks bytes-per-tool-call.
 
-- **code\_read(path, symbol)** → just that function/class + a few context lines.
-  No symbol → a collapsed-body outline of the file.
-- **code\_outline(path)** → the AST skeleton: every symbol's signature + line span.
-- **code\_search(query)** → matches **grouped by their enclosing symbol**, not raw
-  lines. Many grep hits collapse into the handful of functions that contain them.
-- **code\_edit(path, symbol, new\_source)** → replace a whole symbol in place,
-  anchored to its AST span. Validates the file still parses. No re-read afterward.
-- **db\_schema(path | connection\_env)** → map an entire SQLite or PostgreSQL
-  schema in one metadata-only call: tables/views, columns, keys, and indexes.
+## The tools
+
+| Tool | What it returns |
+| --- | --- |
+| `code_read(path, symbol)` | Just that function/class + a few context lines (default 3). No symbol: a collapsed-body outline of the file. |
+| `code_outline(path)` | The AST skeleton: every symbol's signature + line span. |
+| `code_search(query)` | Matches **grouped by their enclosing symbol**, not raw lines. Many grep hits collapse into the handful of functions that contain them. Optional `path_glob`. |
+| `code_edit(path, symbol, new_source)` | Replaces a whole symbol in place, anchored to its AST span. Validates the file still parses. No re-read afterward. |
+| `db_schema(path \| connection_env)` | An entire SQLite or PostgreSQL schema in one metadata-only call: tables/views, columns, keys, and indexes. |
+| `moz_savings` · `moz_status` · `moz_dashboard` | Estimated savings, server status, and the HTML dashboard (also exposed as slash commands, below). |
 
 Unsupported languages and parse errors **degrade gracefully** to a plain
-(line-numbered) read — a tool call never hard-fails.
+(line-numbered) read, so a tool call never hard-fails.
 
-**Languages with real AST extraction:** TypeScript, TSX, JavaScript, Python.
-Anything else falls back to a plain read.
+- **Languages with real AST extraction:** TypeScript, TSX, JavaScript, Python.
+  Anything else falls back to a plain read.
+- **Databases:** pass a SQLite path directly, or put a PostgreSQL URL in
+  `DATABASE_URL` (or another environment variable named via `connection_env`).
+  Credentials never need to appear in a model-visible tool argument.
+- **Edits stay in the project:** `code_edit` refuses paths outside the project
+  root (including `../` and symlinks that leave it); use the host's own Edit tool
+  there. Set `MOZCODE_ALLOW_EDIT_OUTSIDE_PROJECT=1` in the server environment to
+  lift this. The read-only tools accept any path.
 
-**Databases:** pass a SQLite path directly, or put a PostgreSQL URL in
-`DATABASE_URL` (or another environment variable named via `connection_env`).
-Credentials never need to appear in a model-visible tool argument.
-
-**Edits stay in the project:** `code_edit` refuses paths outside the project
-root (including `../` and symlinks that leave it); use the host's own Edit tool
-there. Set `MOZCODE_ALLOW_EDIT_OUTSIDE_PROJECT=1` in the server environment to
-lift this. The read-only tools accept any path.
+The plugin also ships two agents: `moz-code`, a coding agent that reads and edits by
+symbol, and `moz-explore`, a read-only explorer that runs on Sonnet so broad scans stay
+cheaper than the main model.
 
 ## Install (local, no account)
 
 ```bash
-git clone <this-repo> mozcode && cd mozcode
+git clone https://github.com/Malek1414/MOZCODE.git mozcode && cd mozcode
 npm install
 npm run build
 ```
@@ -68,8 +96,9 @@ at this directory), or run the server directly for testing:
 node --no-warnings dist/server.js   # speaks MCP over stdio
 ```
 
-For Codex, run the one-time absolute-path registration after installing or
-updating the plugin:
+### Codex
+
+Run the one-time absolute-path registration after installing or updating the plugin:
 
 ```bash
 npm run install:codex
@@ -83,16 +112,29 @@ the project where Codex was started. It also marks that `cwd` as host-confirmed,
 which keeps MOZCODE usable when the active project is the MOZCODE repository
 itself. Restart an already-open Codex session after running it.
 
+### How the manifests fit together
+
 The Claude manifest (`.claude-plugin/plugin.json`) and universal OpenAI/Codex
 manifest (`.codex-plugin/plugin.json`) register the same local `mozcode` MCP
 server with client-specific launch paths. Claude expands
 `${CLAUDE_PLUGIN_ROOT}` in its manifest; Codex launches `./dist/server.js` with
-the installed plugin root as `cwd` only as a discoverable fallback. Project-
-relative work is guarded in that mode; the one-time installer supplies the real
+the installed plugin root as `cwd` only as a discoverable fallback. Project-relative
+work is guarded in that mode; the one-time installer supplies the real
 workspace-preserving launch. The OpenAI plugin also bundles a `mozcode` skill
 that teaches supported models when to prefer the symbol-level tools. A
 **SessionStart hook** nudges the model to use `code_*` for source files, and the
 three dashboard/status commands remain available.
+
+### Configuration
+
+| Variable | Effect |
+| --- | --- |
+| `MOZCODE_PROJECT` | Explicit project root, overriding the server's working directory. |
+| `MOZCODE_HOME` | Where MOZCODE keeps its state (default `~/.mozcode`). |
+| `MOZCODE_ALLOW_EDIT_OUTSIDE_PROJECT=1` | Lets `code_edit` write outside the project root. |
+| `MOZCODE_NO_STATUSLINE=1` | Stops the SessionStart hook from installing the status line. |
+
+`npm run install:codex` sets `MOZCODE_TRUST_CWD=1` for you; you should not need to set it by hand.
 
 ## The status line
 
@@ -102,8 +144,8 @@ MOZCODE shows live savings on the line beneath your prompt:
 ⚡ MOZCODE est. session: $0.0086 · 1.5k tokens · 4s · 1 roundtrips  │  all-time: $3.17 · 1.1M tokens · 1m 10s · 5 roundtrips
 ```
 
-Claude Code's `statusLine` is a **settings** field, not a plugin-manifest field —
-a plugin cannot declare one. So the SessionStart hook registers MOZCODE's status
+Claude Code's `statusLine` is a **settings** field, not a plugin-manifest field,
+so a plugin cannot declare one. The SessionStart hook therefore registers MOZCODE's status
 line in `~/.claude/settings.json` for you, and tells you in-session the one time
 it does so. It refreshes every 5 seconds on top of Claude Code's event-driven
 updates, so the figures move as tools run rather than only at turn boundaries.
@@ -124,7 +166,7 @@ The install is deliberately conservative:
 - **It refuses to write a `settings.json` it cannot parse**, so a malformed or
   mid-edit config is never corrupted.
 - **Opt out** with `MOZCODE_NO_STATUSLINE=1`, or just edit the `statusLine`
-  entry — MOZCODE will not fight you for it.
+  entry. MOZCODE will not fight you for it.
 
 ## Commands
 
@@ -153,9 +195,14 @@ illustrates the mechanism; it is **not a billing figure**, and the baseline (wha
 you would have spent otherwise) cannot be directly observed. The dashboard says so
 on its face.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/divider-dark.svg">
+  <img alt="" src="assets/readme/divider-light.svg" width="100%">
+</picture>
+
 ## Architecture
 
-```javascript
+```text
 Claude Code / Codex / OpenAI model session
   ├─ Claude manifest or Codex absolute registration spawns node dist/server.js
   │     └─ 4 code tools + db_schema + 3 moz_* tools; records metering in-process
@@ -163,12 +210,14 @@ Claude Code / Codex / OpenAI model session
   └─ commands/                 → /moz-savings /moz-status /moz-dashboard
 ```
 
-- `src/ast/` — tree-sitter loader + a controlled tree walk that captures top-level
+- `src/ast/`: tree-sitter loader + a controlled tree walk that captures top-level
   and class-member symbols (without descending into function bodies).
-- `src/tools/` — the four tools, each with one job and a graceful fallback.
-- `src/db/` — cached, read-only SQLite/PostgreSQL structural introspection.
-- `src/metering/` — append-only JSONL store + aggregation.
-- `src/dashboard/` — pure `Summary → HTML` renderer (validated data-viz palette).
+- `src/tools/`: the four code tools, each with one job and a graceful fallback.
+- `src/db/`: cached, read-only SQLite/PostgreSQL structural introspection.
+- `src/metering/`: append-only JSONL store (under `~/.mozcode/metering/`) + aggregation.
+- `src/dashboard/`: pure `Summary → HTML` renderer (validated data-viz palette).
+- `agents/`, `skills/`, `hooks/`, `commands/`: the plugin surface for Claude Code and Codex.
+- `dist/`, `grammars/`: the committed bundle and `.wasm` grammars that users run.
 
 **Design note:** the teardown described a PostToolUse hook for metering; MOZCODE
 records in-process instead, because a shell hook only sees tool *text*, not the
@@ -178,16 +227,30 @@ to a single SessionStart nudge (rather than intercepting every tool call).
 ## Develop
 
 ```bash
-
 npm test          # engine, tools, DB schema, metering, dashboard, stdio integration
 npm run build     # esbuild bundle into dist/ + copy grammars into grammars/ (no type check)
 npm run typecheck # tsc --noEmit
 npm run dev       # run the server from source (tsx)
 npm run benchmark:performance  # DB discovery + raw cold/warm latency
+npm run benchmark:tokens       # measured token reduction on a real TypeScript corpus
 ```
+
+`db_schema` and its tests use `node:sqlite`, which needs Node 22.12+. CI runs on
+Node 22 and 24, and fails if the committed `dist/` or `grammars/` are stale
+relative to `src/`, so run `npm run build` and commit the result after changing source.
 
 Design spec: [`docs/superpowers/specs/2026-07-24-mozcode-design.md`](docs/superpowers/specs/2026-07-24-mozcode-design.md).
 
 ## License
 
 MIT.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/divider-dark.svg">
+  <img alt="" src="assets/readme/divider-light.svg" width="100%">
+</picture>
+
+<p align="center">
+  <img alt="" src="assets/readme/logo.svg" width="72"><br>
+  <sub>Built by <a href="https://github.com/Malek1414">Malek Hassan</a> in Berlin.</sub>
+</p>

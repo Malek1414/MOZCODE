@@ -1,0 +1,113 @@
+{
+  "_generator": "https://github.com/Malek1414/Malek1414/blob/main/tools/readme_art.py",
+  "title": "MOZCODE",
+  "tagline": "Reads the symbol you asked for, not the whole file.",
+  "chips": [
+    "tree-sitter AST",
+    "*symbol-level MCP",
+    "AST-anchored edits",
+    "local savings dashboard"
+  ],
+  "footer_left": "Malek Hassan · Berlin · 2026",
+  "footer_right": "TypeScript · MCP · Claude Code · Codex",
+  "alt": "MOZCODE: a pixel mosquito with flapping wings dipping its proboscis into a pair of code braces for one small sip",
+  "accent": "body",
+  "colors": {
+    "body": [
+      "#3fd6e0",
+      "#0b8a96"
+    ],
+    "stripe": [
+      "#1c8c99",
+      "#06535b"
+    ],
+    "wing": [
+      "#cdf6f9",
+      "#7cc8cf"
+    ],
+    "eye": [
+      "#0d1117",
+      "#1f2328"
+    ],
+    "leg": [
+      "#9fb6c4",
+      "#4a5866"
+    ],
+    "brace": [
+      "#ffcf5c",
+      "#b8730a"
+    ]
+  },
+  "legend": {
+    "W": [
+      "wing",
+      "wing"
+    ],
+    "V": [
+      "stripe",
+      "wing"
+    ],
+    "H": [
+      "body",
+      "head"
+    ],
+    "E": [
+      "eye",
+      "head"
+    ],
+    "Q": [
+      "wing",
+      "head"
+    ],
+    "A": [
+      "leg",
+      "head"
+    ],
+    "B": [
+      "body",
+      "body"
+    ],
+    "S": [
+      "stripe",
+      "body"
+    ],
+    "L": [
+      "leg",
+      "legs"
+    ],
+    "C": [
+      "brace",
+      "symbol"
+    ]
+  },
+  "motions": {
+    "wing": "flap",
+    "head": "nod",
+    "symbol": "glow"
+  },
+  "origins": {
+    "wing": "7% 100%"
+  },
+  "sprite": [
+    ".................VVVV.........",
+    "................VWWWWV........",
+    "................VWWWWV..VVVV..",
+    "...............VWWWWWVVVWWWWV.",
+    "....A..A.......VWWWWVWWWWWWWV.",
+    ".....A..A......VWWWVWWWWWWWV..",
+    "......A.A......VWWVWWWWWWVV...",
+    ".......HHHH....VWVVVVVVVV.....",
+    "......HQEHHHBBBBB.............",
+    "......HEEHHHBBBBBB............",
+    "......HHHHHHBBBBBBBBSS........",
+    "......HHHHHHBBBBBBBBSSBBSS....",
+    "......AHHHH.BBBBBBBBSSBBSSBBS.",
+    "..CC.A.CC....BBBB..BSSBBSSBBSS",
+    "..C..A..C...L.L.L.....BBSSBBS.",
+    "..C..A..C..L..L..L............",
+    ".C...A...C.L...L..L...........",
+    "..C.....C..L...L...L..........",
+    "..C.....C..L...L....L.........",
+    "..CC...CC.L.....L....L........"
+  ]
+}
