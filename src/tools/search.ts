@@ -170,15 +170,62 @@ export function compileQuery(query: string): CompiledQuery {
   }
 }
 
-/** Innermost symbol whose span contains the offset. */
-function enclosing(symbols: Symbol[], offset: number): Symbol | null {
-  let best: Symbol | null = null;
-  for (const s of symbols) {
-    if (offset >= s.startIndex && offset <= s.endIndex) {
-      if (!best || s.endIndex - s.startIndex < best.endIndex - best.startIndex) best = s;
+/**
+ * Resolve the enclosing (innermost containing) symbol for every match in a
+ * file in one pass.
+ *
+ * `offsets` must be in non-decreasing order (true for a single file's matches,
+ * since the line-scan loop walks the file top to bottom). Symbols are sorted
+ * once by startIndex, then swept alongside the offsets with a stack of
+ * currently-open spans: spans that ended before the current offset are popped
+ * off the top, spans that have started are pushed on, and the answer for each
+ * offset is the smallest-span entry still on the stack that contains it. Each
+ * symbol is pushed and popped at most once, so this is O(matches + symbols)
+ * per file instead of a linear symbol scan per match (O(matches * symbols)).
+ *
+ * The stack push/pop only tracks which spans *can* still contain a future
+ * offset (cheap to get right); the final smallest-span pick re-checks
+ * containment and scans the whole (tiny, nesting-depth-bounded) stack rather
+ * than trusting the top, so it stays correct even for the degenerate case of
+ * two non-nested symbols that touch at exactly the queried offset.
+ *
+ * Sweeping requires spans sorted by startIndex, but ties on span size must
+ * still resolve the same way the original linear scan did: first match in
+ * `symbols` wins. So candidates are tracked by their index into the original
+ * (unsorted) `symbols` array, and a tie on size is broken by the smaller
+ * index rather than by stack/sweep order.
+ */
+function enclosingSweep(symbols: Symbol[], offsets: number[]): (Symbol | null)[] {
+  const order = symbols.map((_, i) => i);
+  if (order.length > 1) order.sort((a, b) => symbols[a].startIndex - symbols[b].startIndex);
+  const stack: number[] = [];
+  let j = 0;
+  const out: (Symbol | null)[] = new Array(offsets.length);
+  for (let k = 0; k < offsets.length; k++) {
+    const offset = offsets[k];
+    while (stack.length > 0 && symbols[stack[stack.length - 1]].endIndex < offset) stack.pop();
+    while (j < order.length && symbols[order[j]].startIndex <= offset) {
+      const idx = order[j];
+      j++;
+      if (symbols[idx].endIndex >= offset) stack.push(idx);
     }
+    let bestIdx = -1;
+    for (const idx of stack) {
+      const s = symbols[idx];
+      if (offset >= s.startIndex && offset <= s.endIndex) {
+        if (bestIdx === -1) {
+          bestIdx = idx;
+        } else {
+          const best = symbols[bestIdx];
+          const bestSize = best.endIndex - best.startIndex;
+          const size = s.endIndex - s.startIndex;
+          if (size < bestSize || (size === bestSize && idx < bestIdx)) bestIdx = idx;
+        }
+      }
+    }
+    out[k] = bestIdx === -1 ? null : symbols[bestIdx];
   }
-  return best;
+  return out;
 }
 
 export async function codeSearch(
@@ -213,6 +260,11 @@ export async function codeSearch(
     const file = files[idx];
     const source = await batch[slot];
     if (source === null) continue;
+    // If the required literal is absent from the whole file, it can't be on
+    // any line either, so every line would fail the per-line check below:
+    // skip straight to the next file without paying for split()'s per-line
+    // array allocation.
+    if (requiredLiteral !== undefined && !source.includes(requiredLiteral)) continue;
     let offset = 0;
     const lines = source.split("\n");
     for (let i = 0; i < lines.length; i++) {
@@ -261,8 +313,12 @@ export async function codeSearch(
     const { symbols } = await analyzeFile(file);
     const seen = new Map<string, { sym: Symbol; count: number; lines: number[] }>();
     const looseLines: RawMatch[] = [];
-    for (const m of fileMatches) {
-      const sym = enclosing(symbols, m.offset);
+    // fileMatches is already in increasing offset order: matches are pushed by
+    // the line-scan loop as it walks the file top to bottom.
+    const enclosingSyms = enclosingSweep(symbols, fileMatches.map((m) => m.offset));
+    for (let fi = 0; fi < fileMatches.length; fi++) {
+      const m = fileMatches[fi];
+      const sym = enclosingSyms[fi];
       if (!sym) {
         looseLines.push(m);
         continue;
