@@ -44,5 +44,89 @@ for (let round = 0; round < 3; round++) {
   }
 }
 const seconds = (performance.now() - start) / 1000;
+
+// Correctness-only patterns (escapes, flags, quantifiers, classes): hashed, not timed.
+const EDGE = String.raw`
+function\s+\w+
+a{2}
+ab{0}c
+(?i)PROMISE
+(?s)foo.bar
+(?m)^export
+(?i:Map)<
+x(?:y|z)w
+Map<string, ?number>
+\.then\(
+\$\{
+\[\]
+[]a]bc
+[^)]+\)
+a\-b
+foo\/bar
+\x2e then
+\x{2E}then
+\pLtring
+\p{Lu}romise
+\PLtring
+\101sync
+\QPromise<\E
+\Q.then(\E
+\btype\b
+\Bype\b
+\Aimport
+;\z
+\n
+\t
+async\s*\(
+=>\s*\{
+a+?b
+a*?
+.*
+^$
+^\s*//
+//.*TODO
+\d+px
+\w+Error\(
+\(\)\s*=>
+\\n
+\\
+"\\"
+'[^']*'
+\{[^}]*\}
+for \(const
+if \(!
+return null;
+\.length\s*[<>]=?\s*\d
+Symbol\.\w+
+(a|b)c
+abc|def
+abc(|x)
+x{1,3}y
+x{,3}y
+x{}y
+{
+}
+\}
+re(?P<n>quire)
+require\(["']
+import\s+\*\s+as
+A
+\cA
+\e
+[[:alpha:]]+Error
+[\d]+
+\\d
+Ω
+é
+`.trim().split("\n");
+for (const q of EDGE) {
+  let text: string;
+  try {
+    text = (await codeSearch(corpus, q)).text;
+  } catch (e) {
+    text = `THROW ${(e as Error).message}`;
+  }
+  hash.update(`edge\u0000${q}\u0000${text}\u0000`);
+}
 console.log(`HASH ${hash.digest("hex")}`);
 console.log(seconds.toFixed(4));
