@@ -33077,9 +33077,100 @@ function matchesGlob(filePath, glob) {
 // src/tools/search.ts
 var MAX_MATCHES = 200;
 var READ_BATCH = 32;
+function extractRequiredLiteral(pattern) {
+  if (/\(\?[a-zA-Z-]*i[a-zA-Z-]*[:)]/.test(pattern)) return void 0;
+  const n = pattern.length;
+  let best = "";
+  let cur = "";
+  const flush = () => {
+    if (cur.length > best.length) best = cur;
+    cur = "";
+  };
+  const skipClass = (start2) => {
+    let i3 = start2 + 1;
+    if (pattern[i3] === "^") i3++;
+    if (pattern[i3] === "]") i3++;
+    while (i3 < n && pattern[i3] !== "]") {
+      if (pattern[i3] === "\\") i3++;
+      i3++;
+    }
+    return i3 + 1;
+  };
+  let i2 = 0;
+  while (i2 < n) {
+    const c = pattern[i2];
+    if (c === "\\") {
+      const c2 = pattern[i2 + 1];
+      if (c2 !== void 0 && ".^$*+?()[]{}|\\/-".includes(c2)) {
+        cur += c2;
+      } else if (c2 !== void 0 && "dDwWsSbBAzntrfv".includes(c2)) {
+        flush();
+      } else {
+        return void 0;
+      }
+      i2 += 2;
+      continue;
+    }
+    if (c === "[") {
+      flush();
+      i2 = skipClass(i2);
+      continue;
+    }
+    if (c === "(") {
+      flush();
+      let depth = 1;
+      i2 += 1;
+      while (i2 < n && depth > 0) {
+        const cc = pattern[i2];
+        if (cc === "\\") {
+          i2 += 2;
+          continue;
+        }
+        if (cc === "[") {
+          i2 = skipClass(i2);
+          continue;
+        }
+        if (cc === "(") depth++;
+        else if (cc === ")") depth--;
+        i2 += 1;
+      }
+      continue;
+    }
+    if (c === "|") {
+      return void 0;
+    }
+    if (c === "." || c === "^" || c === "$") {
+      flush();
+      i2 += 1;
+      continue;
+    }
+    if (c === "*" || c === "+" || c === "?") {
+      if (cur.length > 0) cur = cur.slice(0, -1);
+      flush();
+      i2 += 1;
+      continue;
+    }
+    if (c === "{") {
+      const m = /^\{\d*(,\d*)?\}/.exec(pattern.slice(i2));
+      if (m) {
+        if (cur.length > 0) cur = cur.slice(0, -1);
+        flush();
+        i2 += m[0].length;
+        continue;
+      }
+      cur += c;
+      i2 += 1;
+      continue;
+    }
+    cur += c;
+    i2 += 1;
+  }
+  flush();
+  return best.length > 0 ? best : void 0;
+}
 function compileQuery(query) {
   try {
-    return { rx: RE2JS.compile(query) };
+    return { rx: RE2JS.compile(query), requiredLiteral: extractRequiredLiteral(query) };
   } catch {
     let validJs = false;
     try {
@@ -33103,7 +33194,7 @@ function enclosing(symbols, offset) {
   return best;
 }
 async function codeSearch(root, query, pathGlob, fileLimit) {
-  const { rx, note } = compileQuery(query);
+  const { rx, note, requiredLiteral } = compileQuery(query);
   const { files: files2, truncated: filesTruncated } = await listSourceFiles(root, {
     limit: fileLimit,
     include: pathGlob ? (file) => matchesGlob(path3.isAbsolute(pathGlob) ? file : path3.relative(root, file), pathGlob) : void 0
@@ -33124,12 +33215,15 @@ async function codeSearch(root, query, pathGlob, fileLimit) {
     let offset = 0;
     const lines = source.split("\n");
     for (let i2 = 0; i2 < lines.length; i2++) {
-      const m = rx.matcher(lines[i2]);
-      if (m.find()) {
-        matches.push({ file, line: i2 + 1, text: lines[i2].trim(), offset: offset + m.start() });
-        if (matches.length >= MAX_MATCHES) break;
+      const line = lines[i2];
+      if (requiredLiteral === void 0 || line.includes(requiredLiteral)) {
+        const m = rx.matcher(line);
+        if (m.find()) {
+          matches.push({ file, line: i2 + 1, text: line.trim(), offset: offset + m.start() });
+          if (matches.length >= MAX_MATCHES) break;
+        }
       }
-      offset += lines[i2].length + 1;
+      offset += line.length + 1;
     }
     if (matches.length >= MAX_MATCHES) break;
   }
