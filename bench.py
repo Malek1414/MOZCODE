@@ -11,7 +11,8 @@ import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-MAIN_REPO = pathlib.Path("/Users/malekhassan/Desktop/Projects/mozcode")
+MAIN_REPO = pathlib.Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                        cwd=HERE, capture_output=True, text=True).stdout.strip()).parent
 CACHE = pathlib.Path.home() / ".cache" / "heartgold-mozcode"
 CORPUS = CACHE / "corpus"
 GOLDEN = CACHE / "golden.txt"

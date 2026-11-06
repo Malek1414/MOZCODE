@@ -70,8 +70,12 @@ function extractRequiredLiteral(pattern: string): string | undefined {
       const c2 = pattern[i + 1];
       if (c2 !== undefined && ".^$*+?()[]{}|\\/-".includes(c2)) {
         cur += c2;
+      } else if (c2 !== undefined && "dDwWsSbBAzntrfv".includes(c2)) {
+        flush(); // single-character class/assertion escape: not literal text
       } else {
-        flush(); // \d \w \s \b \1 etc.: not a literal character
+        // \x41, \x{e9}, \pL, \p{Lu}, \101, \Q...\E and the like take arguments
+        // that look like literal text but aren't; give up on the prefilter.
+        return undefined;
       }
       i += 2;
       continue;
