@@ -22,6 +22,121 @@ interface CompiledQuery {
   rx: RE2JS;
   /** Set when the query was searched as a literal string instead of a regex. */
   note?: string;
+  /**
+   * Longest substring that must literally appear (verbatim) in any line the
+   * pattern can match, e.g. "foo" for `foo\w+\(\)`. Lines failing a cheap
+   * `includes()` check against this can never match the full regex, so it
+   * lets the line-scan loop skip the RE2 matcher entirely for them. Left
+   * undefined when no such substring could be proven (e.g. top-level
+   * alternation, or a pattern with no literal run at all).
+   */
+  requiredLiteral?: string;
+}
+
+/**
+ * Extract the longest substring that is unconditionally present (as plain
+ * text) in anything the pattern matches. Conservative by construction: any
+ * construct whose required contents aren't provably simple literal text
+ * (groups, character classes, backreference-style escapes) is skipped as an
+ * opaque span rather than parsed, and a top-level `|` aborts entirely, so a
+ * wrong answer can only make the prefilter weaker, never incorrect.
+ */
+function extractRequiredLiteral(pattern: string): string | undefined {
+  // An inline `(?i)`-style flag makes some or all of the match case
+  // insensitive, so any literal text we'd extract can't be safely compared
+  // with a case-sensitive `includes()`. Bail rather than get it wrong.
+  if (/\(\?[a-zA-Z-]*i[a-zA-Z-]*[:)]/.test(pattern)) return undefined;
+  const n = pattern.length;
+  let best = "";
+  let cur = "";
+  const flush = () => {
+    if (cur.length > best.length) best = cur;
+    cur = "";
+  };
+  const skipClass = (start: number): number => {
+    let i = start + 1; // past '['
+    if (pattern[i] === "^") i++;
+    if (pattern[i] === "]") i++; // leading ']' is a literal member
+    while (i < n && pattern[i] !== "]") {
+      if (pattern[i] === "\\") i++;
+      i++;
+    }
+    return i + 1; // past ']'
+  };
+  let i = 0;
+  while (i < n) {
+    const c = pattern[i];
+    if (c === "\\") {
+      const c2 = pattern[i + 1];
+      if (c2 !== undefined && ".^$*+?()[]{}|\\/-".includes(c2)) {
+        cur += c2;
+      } else {
+        flush(); // \d \w \s \b \1 etc.: not a literal character
+      }
+      i += 2;
+      continue;
+    }
+    if (c === "[") {
+      flush();
+      i = skipClass(i);
+      continue;
+    }
+    if (c === "(") {
+      // Opaque: don't try to reason about alternation/backreferences/flags
+      // inside groups, just skip the whole (possibly nested) span.
+      flush();
+      let depth = 1;
+      i += 1;
+      while (i < n && depth > 0) {
+        const cc = pattern[i];
+        if (cc === "\\") {
+          i += 2;
+          continue;
+        }
+        if (cc === "[") {
+          i = skipClass(i);
+          continue;
+        }
+        if (cc === "(") depth++;
+        else if (cc === ")") depth--;
+        i += 1;
+      }
+      continue;
+    }
+    if (c === "|") {
+      // Top-level alternation: no substring is common to every branch.
+      return undefined;
+    }
+    if (c === "." || c === "^" || c === "$") {
+      flush();
+      i += 1;
+      continue;
+    }
+    if (c === "*" || c === "+" || c === "?") {
+      // Quantifies the char just added: it may occur zero times, so it
+      // isn't actually required.
+      if (cur.length > 0) cur = cur.slice(0, -1);
+      flush();
+      i += 1;
+      continue;
+    }
+    if (c === "{") {
+      const m = /^\{\d*(,\d*)?\}/.exec(pattern.slice(i));
+      if (m) {
+        if (cur.length > 0) cur = cur.slice(0, -1);
+        flush();
+        i += m[0].length;
+        continue;
+      }
+      cur += c; // not a well-formed quantifier: literal brace
+      i += 1;
+      continue;
+    }
+    cur += c;
+    i += 1;
+  }
+  flush();
+  return best.length > 0 ? best : undefined;
 }
 
 /**
@@ -33,7 +148,7 @@ interface CompiledQuery {
  */
 export function compileQuery(query: string): CompiledQuery {
   try {
-    return { rx: RE2JS.compile(query) };
+    return { rx: RE2JS.compile(query), requiredLiteral: extractRequiredLiteral(query) };
   } catch {
     let validJs = false;
     try {
@@ -68,7 +183,7 @@ export async function codeSearch(
   pathGlob?: string,
   fileLimit?: number,
 ): Promise<ToolResult> {
-  const { rx, note } = compileQuery(query);
+  const { rx, note, requiredLiteral } = compileQuery(query);
   const { files, truncated: filesTruncated } = await listSourceFiles(root, {
     limit: fileLimit,
     include: pathGlob
@@ -97,12 +212,15 @@ export async function codeSearch(
     let offset = 0;
     const lines = source.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      const m = rx.matcher(lines[i]);
-      if (m.find()) {
-        matches.push({ file, line: i + 1, text: lines[i].trim(), offset: offset + m.start() });
-        if (matches.length >= MAX_MATCHES) break;
+      const line = lines[i];
+      if (requiredLiteral === undefined || line.includes(requiredLiteral)) {
+        const m = rx.matcher(line);
+        if (m.find()) {
+          matches.push({ file, line: i + 1, text: line.trim(), offset: offset + m.start() });
+          if (matches.length >= MAX_MATCHES) break;
+        }
       }
-      offset += lines[i].length + 1; // + newline
+      offset += line.length + 1; // + newline
     }
     if (matches.length >= MAX_MATCHES) break;
   }
