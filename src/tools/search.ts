@@ -31,6 +31,100 @@ interface CompiledQuery {
    * alternation, or a pattern with no literal run at all).
    */
   requiredLiteral?: string;
+  /**
+   * One required literal per top-level alternation branch, e.g.
+   * `["TODO", "FIXME", "XXX"]` for `TODO|FIXME|XXX`: any line (or file) the
+   * pattern can match must contain at least one of these. A single-branch
+   * pattern yields a one-element array (same literal as `requiredLiteral`).
+   * Undefined whenever any branch has no provable literal, same conservatism
+   * as `requiredLiteral`. Drives the whole-buffer scan in `codeSearch`, which
+   * never splits a file into lines at all when this is empty-of-hits.
+   */
+  requiredLiterals?: string[];
+}
+
+function skipClass(pattern: string, start: number): number {
+  let i = start + 1; // past '['
+  if (pattern[i] === "^") i++;
+  if (pattern[i] === "]") i++; // leading ']' is a literal member
+  const n = pattern.length;
+  while (i < n && pattern[i] !== "]") {
+    if (pattern[i] === "\\") i++;
+    i++;
+  }
+  return i + 1; // past ']'
+}
+
+/**
+ * Split a pattern into its top-level alternation branches (depth-0 `|`),
+ * treating groups and character classes as opaque spans so a `|` nested
+ * inside either doesn't count as a split point. A pattern with no top-level
+ * `|` yields a single-element array (the whole pattern).
+ */
+function splitTopLevelAlternation(pattern: string): string[] {
+  const n = pattern.length;
+  const parts: string[] = [];
+  let start = 0;
+  let i = 0;
+  while (i < n) {
+    const c = pattern[i];
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (c === "[") {
+      i = skipClass(pattern, i);
+      continue;
+    }
+    if (c === "(") {
+      let depth = 1;
+      i += 1;
+      while (i < n && depth > 0) {
+        const cc = pattern[i];
+        if (cc === "\\") {
+          i += 2;
+          continue;
+        }
+        if (cc === "[") {
+          i = skipClass(pattern, i);
+          continue;
+        }
+        if (cc === "(") depth++;
+        else if (cc === ")") depth--;
+        i += 1;
+      }
+      continue;
+    }
+    if (c === "|") {
+      parts.push(pattern.slice(start, i));
+      i += 1;
+      start = i;
+      continue;
+    }
+    i += 1;
+  }
+  parts.push(pattern.slice(start));
+  return parts;
+}
+
+/**
+ * Like `extractRequiredLiteral`, but for patterns with top-level alternation:
+ * returns one required literal per branch (so a match requires at least one
+ * of them present), or undefined if any branch has no provable literal.
+ */
+function extractRequiredLiterals(pattern: string): string[] | undefined {
+  const branches = splitTopLevelAlternation(pattern);
+  if (branches.length === 1) {
+    const lit = extractRequiredLiteral(pattern);
+    return lit === undefined ? undefined : [lit];
+  }
+  const literals: string[] = [];
+  for (const branch of branches) {
+    const lit = extractRequiredLiteral(branch);
+    if (lit === undefined) return undefined;
+    literals.push(lit);
+  }
+  return literals;
 }
 
 /**
@@ -53,16 +147,6 @@ function extractRequiredLiteral(pattern: string): string | undefined {
     if (cur.length > best.length) best = cur;
     cur = "";
   };
-  const skipClass = (start: number): number => {
-    let i = start + 1; // past '['
-    if (pattern[i] === "^") i++;
-    if (pattern[i] === "]") i++; // leading ']' is a literal member
-    while (i < n && pattern[i] !== "]") {
-      if (pattern[i] === "\\") i++;
-      i++;
-    }
-    return i + 1; // past ']'
-  };
   let i = 0;
   while (i < n) {
     const c = pattern[i];
@@ -82,7 +166,7 @@ function extractRequiredLiteral(pattern: string): string | undefined {
     }
     if (c === "[") {
       flush();
-      i = skipClass(i);
+      i = skipClass(pattern, i);
       continue;
     }
     if (c === "(") {
@@ -98,7 +182,7 @@ function extractRequiredLiteral(pattern: string): string | undefined {
           continue;
         }
         if (cc === "[") {
-          i = skipClass(i);
+          i = skipClass(pattern, i);
           continue;
         }
         if (cc === "(") depth++;
@@ -152,7 +236,11 @@ function extractRequiredLiteral(pattern: string): string | undefined {
  */
 export function compileQuery(query: string): CompiledQuery {
   try {
-    return { rx: RE2JS.compile(query), requiredLiteral: extractRequiredLiteral(query) };
+    return {
+      rx: RE2JS.compile(query),
+      requiredLiteral: extractRequiredLiteral(query),
+      requiredLiterals: extractRequiredLiterals(query),
+    };
   } catch {
     let validJs = false;
     try {
@@ -228,13 +316,129 @@ function enclosingSweep(symbols: Symbol[], offsets: number[]): (Symbol | null)[]
   return out;
 }
 
+/**
+ * Full line-by-line scan with no literal prefilter: the safe fallback.
+ *
+ * Walks the raw buffer with `indexOf('\n', ...)` instead of `source.split("\n")`,
+ * so a file never pays for allocating (and GC'ing) an array of every one of its
+ * lines up front — each line is sliced out one at a time, right before it's fed
+ * to the matcher, and a MAX_MATCHES cutoff stops the walk without ever touching
+ * the rest of the buffer. Mirrors `split("\n")`'s exact line boundaries,
+ * including the trailing empty "line" a trailing newline produces.
+ *
+ * `rx.test(line)` runs the same unanchored search as a fresh matcher's first
+ * `find()` but skips allocating a `Matcher` object; a `Matcher` (for `.start()`)
+ * is only built on the rare line that actually matches.
+ */
+function scanAllLines(source: string, rx: RE2JS, file: string, matches: RawMatch[]): void {
+  const n = source.length;
+  let lineStart = 0;
+  let lineNo = 1;
+  for (;;) {
+    let lineEnd = source.indexOf("\n", lineStart);
+    const isLast = lineEnd === -1;
+    if (isLast) lineEnd = n;
+    const line = source.slice(lineStart, lineEnd);
+    if (rx.test(line)) {
+      const m = rx.matcher(line);
+      m.find();
+      matches.push({ file, line: lineNo, text: line.trim(), offset: lineStart + m.start() });
+      if (matches.length >= MAX_MATCHES) return;
+    }
+    if (isLast) return;
+    lineStart = lineEnd + 1;
+    lineNo++;
+  }
+}
+
+/**
+ * Count '\n' characters in source[from, to) without allocating a substring
+ * (used to track line numbers while skipping over untouched regions).
+ */
+function countNewlines(source: string, from: number, to: number): number {
+  let count = 0;
+  let p = source.indexOf("\n", from);
+  while (p !== -1 && p < to) {
+    count++;
+    p = source.indexOf("\n", p + 1);
+  }
+  return count;
+}
+
+/**
+ * Whole-buffer literal pruning: find every byte range in the raw file text
+ * that could contain a match (i.e. contains at least one required literal)
+ * before ever splitting the file into lines. Files or regions with no hit for
+ * any literal never pay for split()'s per-line allocation or a per-line
+ * `includes()` check — the win the plain whole-file skip couldn't give for a
+ * large file with only a few scattered hits, or for an alternation query like
+ * `TODO|FIXME` with no single literal common to every branch.
+ *
+ * Line numbers are derived incrementally (newlines counted only across the
+ * gap since the last processed line, never from the top of the file), and
+ * each candidate line is sliced directly out of `source` and fed to RE2
+ * exactly once, mirroring the line-by-line scan's semantics. `rx.test(line)`
+ * checks for a match without allocating a `Matcher`; one is only built (to
+ * read `.start()`) on a line that actually matches.
+ */
+function scanWithRequiredLiterals(
+  source: string,
+  literals: string[],
+  rx: RE2JS,
+  file: string,
+  matches: RawMatch[],
+): void {
+  let hits: number[];
+  if (literals.length === 1) {
+    hits = [];
+    const lit = literals[0];
+    let p = source.indexOf(lit);
+    while (p !== -1) {
+      hits.push(p);
+      p = source.indexOf(lit, p + lit.length);
+    }
+  } else {
+    hits = [];
+    for (const lit of literals) {
+      let p = source.indexOf(lit);
+      while (p !== -1) {
+        hits.push(p);
+        p = source.indexOf(lit, p + lit.length);
+      }
+    }
+    hits.sort((a, b) => a - b);
+  }
+  let pos = 0;
+  let lineNo = 1;
+  let lastLineEnd = -1;
+  for (let hi = 0; hi < hits.length; hi++) {
+    const h = hits[hi];
+    if (h <= lastLineEnd) continue; // already covered by the previous line
+    const searchFrom = h - 1;
+    const nl = searchFrom < 0 ? -1 : source.lastIndexOf("\n", searchFrom);
+    const lineStart = nl + 1;
+    lineNo += countNewlines(source, pos, lineStart);
+    pos = lineStart;
+    let lineEnd = source.indexOf("\n", lineStart);
+    if (lineEnd === -1) lineEnd = source.length;
+    const line = source.slice(lineStart, lineEnd);
+    if (rx.test(line)) {
+      const m = rx.matcher(line);
+      m.find();
+      matches.push({ file, line: lineNo, text: line.trim(), offset: lineStart + m.start() });
+      if (matches.length >= MAX_MATCHES) return;
+    }
+    lastLineEnd = lineEnd;
+  }
+}
+
 export async function codeSearch(
   root: string,
   query: string,
   pathGlob?: string,
   fileLimit?: number,
 ): Promise<ToolResult> {
-  const { rx, note, requiredLiteral } = compileQuery(query);
+  const { rx, note, requiredLiterals } = compileQuery(query);
   const { files, truncated: filesTruncated } = await listSourceFiles(root, {
     limit: fileLimit,
     include: pathGlob
@@ -266,23 +470,10 @@ export async function codeSearch(
     const file = files[idx];
     const source = await batch[slot];
     if (source === null) continue;
-    // If the required literal is absent from the whole file, it can't be on
-    // any line either, so every line would fail the per-line check below:
-    // skip straight to the next file without paying for split()'s per-line
-    // array allocation.
-    if (requiredLiteral !== undefined && !source.includes(requiredLiteral)) continue;
-    let offset = 0;
-    const lines = source.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (requiredLiteral === undefined || line.includes(requiredLiteral)) {
-        const m = rx.matcher(line);
-        if (m.find()) {
-          matches.push({ file, line: i + 1, text: line.trim(), offset: offset + m.start() });
-          if (matches.length >= MAX_MATCHES) break;
-        }
-      }
-      offset += line.length + 1; // + newline
+    if (requiredLiterals !== undefined) {
+      scanWithRequiredLiterals(source, requiredLiterals, rx, file, matches);
+    } else {
+      scanAllLines(source, rx, file, matches);
     }
     if (matches.length >= MAX_MATCHES) break;
   }

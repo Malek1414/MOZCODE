@@ -33077,6 +33077,76 @@ function matchesGlob(filePath, glob) {
 // src/tools/search.ts
 var MAX_MATCHES = 200;
 var READ_BATCH = 32;
+function skipClass(pattern, start2) {
+  let i2 = start2 + 1;
+  if (pattern[i2] === "^") i2++;
+  if (pattern[i2] === "]") i2++;
+  const n = pattern.length;
+  while (i2 < n && pattern[i2] !== "]") {
+    if (pattern[i2] === "\\") i2++;
+    i2++;
+  }
+  return i2 + 1;
+}
+function splitTopLevelAlternation(pattern) {
+  const n = pattern.length;
+  const parts2 = [];
+  let start2 = 0;
+  let i2 = 0;
+  while (i2 < n) {
+    const c = pattern[i2];
+    if (c === "\\") {
+      i2 += 2;
+      continue;
+    }
+    if (c === "[") {
+      i2 = skipClass(pattern, i2);
+      continue;
+    }
+    if (c === "(") {
+      let depth = 1;
+      i2 += 1;
+      while (i2 < n && depth > 0) {
+        const cc = pattern[i2];
+        if (cc === "\\") {
+          i2 += 2;
+          continue;
+        }
+        if (cc === "[") {
+          i2 = skipClass(pattern, i2);
+          continue;
+        }
+        if (cc === "(") depth++;
+        else if (cc === ")") depth--;
+        i2 += 1;
+      }
+      continue;
+    }
+    if (c === "|") {
+      parts2.push(pattern.slice(start2, i2));
+      i2 += 1;
+      start2 = i2;
+      continue;
+    }
+    i2 += 1;
+  }
+  parts2.push(pattern.slice(start2));
+  return parts2;
+}
+function extractRequiredLiterals(pattern) {
+  const branches = splitTopLevelAlternation(pattern);
+  if (branches.length === 1) {
+    const lit = extractRequiredLiteral(pattern);
+    return lit === void 0 ? void 0 : [lit];
+  }
+  const literals = [];
+  for (const branch of branches) {
+    const lit = extractRequiredLiteral(branch);
+    if (lit === void 0) return void 0;
+    literals.push(lit);
+  }
+  return literals;
+}
 function extractRequiredLiteral(pattern) {
   if (/\(\?[a-zA-Z-]*i[a-zA-Z-]*[:)]/.test(pattern)) return void 0;
   const n = pattern.length;
@@ -33085,16 +33155,6 @@ function extractRequiredLiteral(pattern) {
   const flush = () => {
     if (cur.length > best.length) best = cur;
     cur = "";
-  };
-  const skipClass = (start2) => {
-    let i3 = start2 + 1;
-    if (pattern[i3] === "^") i3++;
-    if (pattern[i3] === "]") i3++;
-    while (i3 < n && pattern[i3] !== "]") {
-      if (pattern[i3] === "\\") i3++;
-      i3++;
-    }
-    return i3 + 1;
   };
   let i2 = 0;
   while (i2 < n) {
@@ -33113,7 +33173,7 @@ function extractRequiredLiteral(pattern) {
     }
     if (c === "[") {
       flush();
-      i2 = skipClass(i2);
+      i2 = skipClass(pattern, i2);
       continue;
     }
     if (c === "(") {
@@ -33127,7 +33187,7 @@ function extractRequiredLiteral(pattern) {
           continue;
         }
         if (cc === "[") {
-          i2 = skipClass(i2);
+          i2 = skipClass(pattern, i2);
           continue;
         }
         if (cc === "(") depth++;
@@ -33170,7 +33230,11 @@ function extractRequiredLiteral(pattern) {
 }
 function compileQuery(query) {
   try {
-    return { rx: RE2JS.compile(query), requiredLiteral: extractRequiredLiteral(query) };
+    return {
+      rx: RE2JS.compile(query),
+      requiredLiteral: extractRequiredLiteral(query),
+      requiredLiterals: extractRequiredLiterals(query)
+    };
   } catch {
     let validJs = false;
     try {
@@ -33216,8 +33280,81 @@ function enclosingSweep(symbols, offsets) {
   }
   return out2;
 }
+function scanAllLines(source, rx, file, matches) {
+  const n = source.length;
+  let lineStart = 0;
+  let lineNo = 1;
+  for (; ; ) {
+    let lineEnd = source.indexOf("\n", lineStart);
+    const isLast = lineEnd === -1;
+    if (isLast) lineEnd = n;
+    const line = source.slice(lineStart, lineEnd);
+    if (rx.test(line)) {
+      const m = rx.matcher(line);
+      m.find();
+      matches.push({ file, line: lineNo, text: line.trim(), offset: lineStart + m.start() });
+      if (matches.length >= MAX_MATCHES) return;
+    }
+    if (isLast) return;
+    lineStart = lineEnd + 1;
+    lineNo++;
+  }
+}
+function countNewlines(source, from, to) {
+  let count = 0;
+  let p = source.indexOf("\n", from);
+  while (p !== -1 && p < to) {
+    count++;
+    p = source.indexOf("\n", p + 1);
+  }
+  return count;
+}
+function scanWithRequiredLiterals(source, literals, rx, file, matches) {
+  let hits;
+  if (literals.length === 1) {
+    hits = [];
+    const lit = literals[0];
+    let p = source.indexOf(lit);
+    while (p !== -1) {
+      hits.push(p);
+      p = source.indexOf(lit, p + lit.length);
+    }
+  } else {
+    hits = [];
+    for (const lit of literals) {
+      let p = source.indexOf(lit);
+      while (p !== -1) {
+        hits.push(p);
+        p = source.indexOf(lit, p + lit.length);
+      }
+    }
+    hits.sort((a, b) => a - b);
+  }
+  let pos = 0;
+  let lineNo = 1;
+  let lastLineEnd = -1;
+  for (let hi = 0; hi < hits.length; hi++) {
+    const h = hits[hi];
+    if (h <= lastLineEnd) continue;
+    const searchFrom = h - 1;
+    const nl = searchFrom < 0 ? -1 : source.lastIndexOf("\n", searchFrom);
+    const lineStart = nl + 1;
+    lineNo += countNewlines(source, pos, lineStart);
+    pos = lineStart;
+    let lineEnd = source.indexOf("\n", lineStart);
+    if (lineEnd === -1) lineEnd = source.length;
+    const line = source.slice(lineStart, lineEnd);
+    if (rx.test(line)) {
+      const m = rx.matcher(line);
+      m.find();
+      matches.push({ file, line: lineNo, text: line.trim(), offset: lineStart + m.start() });
+      if (matches.length >= MAX_MATCHES) return;
+    }
+    lastLineEnd = lineEnd;
+  }
+}
 async function codeSearch(root, query, pathGlob, fileLimit) {
-  const { rx, note, requiredLiteral } = compileQuery(query);
+  const { rx, note, requiredLiterals } = compileQuery(query);
   const { files: files2, truncated: filesTruncated } = await listSourceFiles(root, {
     limit: fileLimit,
     include: pathGlob ? (file) => matchesGlob(path3.isAbsolute(pathGlob) ? file : path3.relative(root, file), pathGlob) : void 0
@@ -33237,19 +33374,10 @@ async function codeSearch(root, query, pathGlob, fileLimit) {
     const file = files2[idx];
     const source = await batch[slot];
     if (source === null) continue;
-    if (requiredLiteral !== void 0 && !source.includes(requiredLiteral)) continue;
-    let offset = 0;
-    const lines = source.split("\n");
-    for (let i2 = 0; i2 < lines.length; i2++) {
-      const line = lines[i2];
-      if (requiredLiteral === void 0 || line.includes(requiredLiteral)) {
-        const m = rx.matcher(line);
-        if (m.find()) {
-          matches.push({ file, line: i2 + 1, text: line.trim(), offset: offset + m.start() });
-          if (matches.length >= MAX_MATCHES) break;
-        }
-      }
-      offset += line.length + 1;
+    if (requiredLiterals !== void 0) {
+      scanWithRequiredLiterals(source, requiredLiterals, rx, file, matches);
+    } else {
+      scanAllLines(source, rx, file, matches);
     }
     if (matches.length >= MAX_MATCHES) break;
   }
