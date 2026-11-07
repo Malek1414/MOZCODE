@@ -248,15 +248,21 @@ export async function codeSearch(
 
   // Read files in parallel batches but scan them in walk order, so results and
   // the MAX_MATCHES cut-off stay deterministic. One stat+read at a time made a
-  // cold search scale with per-file I/O latency times the file count.
-  let batch: Promise<string | null>[] = [];
-  const readBatch = (from: number) => {
-    batch = files.slice(from, from + READ_BATCH).map((f) => readCachedSource(f).catch(() => null));
-  };
-  readBatch(0);
+  // cold search scale with per-file I/O latency times the file count. The next
+  // batch's reads are kicked off as soon as the current batch's reads start
+  // (one batch ahead of the scan), so cold-read I/O latency overlaps with the
+  // CPU-bound line scanning instead of the two serializing.
+  const readBatch = (from: number): Promise<string | null>[] =>
+    files.slice(from, from + READ_BATCH).map((f) => readCachedSource(f).catch(() => null));
+  let batch = readBatch(0);
+  let nextBatch = files.length > READ_BATCH ? readBatch(READ_BATCH) : null;
   for (let idx = 0; idx < files.length; idx++) {
     const slot = idx % READ_BATCH;
-    if (slot === 0 && idx > 0) readBatch(idx);
+    if (slot === 0 && idx > 0) {
+      batch = nextBatch!;
+      const nextFrom = idx + READ_BATCH;
+      nextBatch = nextFrom < files.length ? readBatch(nextFrom) : null;
+    }
     const file = files[idx];
     const source = await batch[slot];
     if (source === null) continue;
