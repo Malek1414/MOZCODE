@@ -41,6 +41,44 @@ interface CompiledQuery {
    * never splits a file into lines at all when this is empty-of-hits.
    */
   requiredLiterals?: string[];
+  /** Prefilter plan used by codeSearch (see planScan). */
+  plan?: ScanPlan;
+}
+
+interface ScanPlan {
+  literals: string[];
+  /** Every match is exactly one of `literals` (no regex work needed). */
+  pure: boolean;
+  /** Literals are lowercase ASCII and must be searched in a lowercased copy. */
+  ci: boolean;
+}
+
+const FLAG_I = /\(\?[a-zA-Z-]*i[a-zA-Z-]*[:)]/;
+const PURE_LITERAL = /^[ -~]+$/;
+const META = /[\\.^$*+?()\[\]{}]/;
+const NON_ASCII = /[^\x00-\x7f]/;
+
+function planScan(query: string): ScanPlan | undefined {
+  let ci = false;
+  let body = query;
+  if (query.startsWith("(?i)")) {
+    ci = true;
+    body = query.slice(4);
+    if (FLAG_I.test(body)) return undefined;
+  }
+  if (PURE_LITERAL.test(body) && !META.test(body)) {
+    const parts = body.split("|");
+    if (parts.every((x) => x.length > 0)) {
+      return { literals: ci ? parts.map((x) => x.toLowerCase()) : parts, pure: true, ci };
+    }
+  }
+  const lits = extractRequiredLiterals(body);
+  if (lits === undefined) return undefined;
+  if (ci) {
+    for (const l of lits) if (!PURE_LITERAL.test(l)) return undefined;
+    return { literals: lits.map((x) => x.toLowerCase()), pure: false, ci };
+  }
+  return { literals: lits, pure: false, ci };
 }
 
 function skipClass(pattern: string, start: number): number {
@@ -240,6 +278,7 @@ export function compileQuery(query: string): CompiledQuery {
       rx: RE2JS.compile(query),
       requiredLiteral: extractRequiredLiteral(query),
       requiredLiterals: extractRequiredLiterals(query),
+      plan: planScan(query),
     };
   } catch {
     let validJs = false;
@@ -387,48 +426,47 @@ function scanWithRequiredLiterals(
   rx: RE2JS,
   file: string,
   matches: RawMatch[],
+  pure = false,
+  hay: string = source,
 ): void {
-  let hits: number[];
-  if (literals.length === 1) {
-    hits = [];
-    const lit = literals[0];
-    let p = source.indexOf(lit);
-    while (p !== -1) {
-      hits.push(p);
-      p = source.indexOf(lit, p + lit.length);
-    }
-  } else {
-    hits = [];
-    for (const lit of literals) {
-      let p = source.indexOf(lit);
-      while (p !== -1) {
-        hits.push(p);
-        p = source.indexOf(lit, p + lit.length);
-      }
-    }
-    hits.sort((a, b) => a - b);
-  }
+  const k = literals.length;
+  // Next occurrence of each literal at or after the cursor, found lazily so a
+  // MAX_MATCHES cut-off never pays for the rest of the file.
+  const next: number[] = new Array(k);
+  for (let j = 0; j < k; j++) next[j] = hay.indexOf(literals[j]);
   let pos = 0;
   let lineNo = 1;
-  let lastLineEnd = -1;
-  for (let hi = 0; hi < hits.length; hi++) {
-    const h = hits[hi];
-    if (h <= lastLineEnd) continue; // already covered by the previous line
-    const searchFrom = h - 1;
-    const nl = searchFrom < 0 ? -1 : source.lastIndexOf("\n", searchFrom);
+  for (;;) {
+    let h = -1;
+    for (let j = 0; j < k; j++) {
+      const v = next[j];
+      if (v !== -1 && (h === -1 || v < h)) h = v;
+    }
+    if (h === -1) return;
+    const nl = h === 0 ? -1 : source.lastIndexOf("\n", h - 1);
     const lineStart = nl + 1;
     lineNo += countNewlines(source, pos, lineStart);
     pos = lineStart;
     let lineEnd = source.indexOf("\n", lineStart);
     if (lineEnd === -1) lineEnd = source.length;
     const line = source.slice(lineStart, lineEnd);
-    if (rx.test(line)) {
-      const m = rx.matcher(line);
-      m.find();
-      matches.push({ file, line: lineNo, text: line.trim(), offset: lineStart + m.start() });
+    if (pure) {
+      // The hit is the leftmost literal occurrence on this line, which is
+      // exactly where the regex's first match would start.
+      matches.push({ file, line: lineNo, text: line.trim(), offset: h });
       if (matches.length >= MAX_MATCHES) return;
+    } else {
+      const m = rx.matcher(line);
+      if (m.find()) {
+        matches.push({ file, line: lineNo, text: line.trim(), offset: lineStart + m.start() });
+        if (matches.length >= MAX_MATCHES) return;
+      }
     }
-    lastLineEnd = lineEnd;
+    if (lineEnd >= source.length) return;
+    const from = lineEnd + 1;
+    for (let j = 0; j < k; j++) {
+      if (next[j] !== -1 && next[j] < from) next[j] = hay.indexOf(literals[j], from);
+    }
   }
 }
 
@@ -438,7 +476,7 @@ export async function codeSearch(
   pathGlob?: string,
   fileLimit?: number,
 ): Promise<ToolResult> {
-  const { rx, note, requiredLiterals } = compileQuery(query);
+  const { rx, note, plan } = compileQuery(query);
   const { files, truncated: filesTruncated } = await listSourceFiles(root, {
     limit: fileLimit,
     include: pathGlob
@@ -470,8 +508,16 @@ export async function codeSearch(
     const file = files[idx];
     const source = await batch[slot];
     if (source === null) continue;
-    if (requiredLiterals !== undefined) {
-      scanWithRequiredLiterals(source, requiredLiterals, rx, file, matches);
+    if (plan !== undefined && !plan.ci) {
+      scanWithRequiredLiterals(source, plan.literals, rx, file, matches, plan.pure);
+    } else if (plan !== undefined) {
+      const lower = source.toLowerCase();
+      // Case folding must be 1:1 and ASCII-only-safe (K/ſ fold to k/s in RE2).
+      if (lower.length === source.length && (!NON_ASCII.test(source) || !plan.literals.some((l) => /[ks]/.test(l)))) {
+        scanWithRequiredLiterals(source, plan.literals, rx, file, matches, plan.pure, lower);
+      } else {
+        scanAllLines(source, rx, file, matches);
+      }
     } else {
       scanAllLines(source, rx, file, matches);
     }
