@@ -34018,6 +34018,7 @@ async function dbSchema(projectRoot, opts = {}) {
 
 // src/metering/store.ts
 import { promises as fs7 } from "node:fs";
+import * as fsSync from "node:fs";
 import * as os from "node:os";
 import * as path5 from "node:path";
 import * as crypto from "node:crypto";
@@ -34062,6 +34063,23 @@ async function writeCurrentSession(project, session) {
   try {
     await fs7.mkdir(sessionsDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
     await fs7.writeFile(sessionPointerFile(project), session, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+  } catch {
+  }
+}
+function processPointerFile(claudePid) {
+  return path5.join(sessionsDir(), `pid-${claudePid}.session`);
+}
+async function writeProcessSession(claudePid, session) {
+  try {
+    await fs7.mkdir(sessionsDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
+    await fs7.writeFile(processPointerFile(claudePid), session, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+  } catch {
+  }
+}
+function removeProcessSessionSync(claudePid, session) {
+  try {
+    const file = processPointerFile(claudePid);
+    if (fsSync.readFileSync(file, "utf8").trim() === session) fsSync.unlinkSync(file);
   } catch {
   }
 }
@@ -34138,6 +34156,28 @@ function summarize(entries, topFiles2 = 15) {
     byFile: [...byFile.entries()].map(([path9, v]) => ({ path: path9, ...v })).sort((a, b) => b.saved - a.saved).slice(0, topFiles2),
     bySession: [...bySession.entries()].map(([session, v]) => ({ session, ...v })).sort((a, b) => b.saved - a.saved)
   };
+}
+
+// src/util/claude-process.ts
+import { execFile as execFile2 } from "node:child_process";
+var CLAUDE_COMMAND = /(^|\/)claude(\.exe)?(\s|$)|@anthropic-ai\/claude-code\//;
+var psLookup = (pid) => new Promise((resolve4) => {
+  if (process.platform === "win32") return resolve4(void 0);
+  execFile2("ps", ["-o", "ppid=,command=", "-p", String(pid)], { timeout: 500 }, (err2, stdout) => {
+    if (err2) return resolve4(void 0);
+    const m = /^\s*(\d+)\s+(.*)$/.exec(stdout.split("\n")[0] ?? "");
+    resolve4(m ? { ppid: Number(m[1]), command: m[2] } : void 0);
+  });
+});
+async function claudeAncestor(start2, lookup = psLookup, maxDepth = 6) {
+  let pid = start2;
+  for (let i2 = 0; i2 < maxDepth && pid > 1; i2++) {
+    const info2 = await lookup(pid);
+    if (!info2) return void 0;
+    if (CLAUDE_COMMAND.test(info2.command)) return pid;
+    pid = info2.ppid;
+  }
+  return void 0;
 }
 
 // src/version.ts
@@ -34816,6 +34856,16 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`[mozcode] MCP server ready (session ${SESSION.slice(0, 8)})`);
+  void publishProcessSession();
+}
+async function publishProcessSession() {
+  const claudePid = await claudeAncestor(process.ppid);
+  if (!claudePid) return;
+  await writeProcessSession(claudePid, SESSION);
+  process.once("exit", () => removeProcessSessionSync(claudePid, SESSION));
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.once(sig, () => process.exit(0));
+  }
 }
 main().catch((err2) => {
   console.error("[mozcode] fatal:", err2);

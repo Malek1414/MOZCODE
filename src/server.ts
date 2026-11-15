@@ -10,7 +10,16 @@ import { codeRead } from "./tools/read.js";
 import { codeSearch } from "./tools/search.js";
 import { codeEdit } from "./tools/edit.js";
 import { dbSchema } from "./db/schema.js";
-import { record, loadEntries, summarize, mozcodeHome, writeCurrentSession } from "./metering/store.js";
+import {
+  record,
+  loadEntries,
+  summarize,
+  mozcodeHome,
+  writeCurrentSession,
+  writeProcessSession,
+  removeProcessSessionSync,
+} from "./metering/store.js";
+import { claudeAncestor } from "./util/claude-process.js";
 import { SUPPORTED_LANGUAGES } from "./ast/languages.js";
 import { VERSION } from "./version.js";
 import { isInsideRoot } from "./util/containment.js";
@@ -342,6 +351,24 @@ async function main(): Promise<void> {
   await server.connect(transport);
   // eslint-disable-next-line no-console
   console.error(`[mozcode] MCP server ready (session ${SESSION.slice(0, 8)})`);
+  // After connecting, so the `ps` walk never delays the handshake.
+  void publishProcessSession();
+}
+
+/**
+ * Also publish SESSION under the pid of the Claude Code process we run under.
+ * The per-project pointer is last-writer-wins, so with two Claude windows open
+ * in one project the statusline of the first would show the second's session.
+ */
+async function publishProcessSession(): Promise<void> {
+  const claudePid = await claudeAncestor(process.ppid);
+  if (!claudePid) return;
+  await writeProcessSession(claudePid, SESSION);
+  process.once("exit", () => removeProcessSessionSync(claudePid, SESSION));
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    // Without a handler these signals skip the "exit" event and leave the pointer behind.
+    process.once(sig, () => process.exit(0));
+  }
 }
 
 main().catch((err) => {
