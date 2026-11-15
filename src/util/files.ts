@@ -84,19 +84,30 @@ function globToRegex(glob: string): RegExp {
 }
 
 /**
+ * Compile a glob once into a reusable path matcher. All glob-dependent work
+ * (pattern normalization and regex compilation) happens a single time here, so
+ * testing many file paths against the same glob never recompiles the regex per
+ * file. Semantics are identical to `matchesGlob`.
+ */
+export function compileGlobMatcher(glob: string): (filePath: string) => boolean {
+  const pattern = glob.split(path.sep).join("/").replace(/^\.\//, "");
+  // A wildcard-free glob also matches everything under that directory.
+  const dirPrefix = /[*?]/.test(pattern) ? null : pattern.replace(/\/+$/, "") + "/";
+  const rx = globToRegex(pattern);
+  const basenameOnly = !pattern.includes("/");
+  return (filePath: string): boolean => {
+    const normalized = filePath.split(path.sep).join("/").replace(/^\.\//, "");
+    if (dirPrefix !== null && normalized.startsWith(dirPrefix)) return true;
+    return basenameOnly ? rx.test(path.posix.basename(normalized)) : rx.test(normalized);
+  };
+}
+
+/**
  * Glob matcher for project-relative paths: supports "*", "**" and "?".
  * A glob without a "/" (e.g. "*.ts") matches against the file's basename, so it
  * applies at any depth; a wildcard-free glob also matches everything under that
  * directory (e.g. "src/tools"). Pass paths relative to the project root.
  */
 export function matchesGlob(filePath: string, glob: string): boolean {
-  const normalized = filePath.split(path.sep).join("/").replace(/^\.\//, "");
-  const pattern = glob.split(path.sep).join("/").replace(/^\.\//, "");
-  if (!/[*?]/.test(pattern)) {
-    const dir = pattern.replace(/\/+$/, "");
-    if (normalized.startsWith(dir + "/")) return true;
-  }
-  const rx = globToRegex(pattern);
-  if (!pattern.includes("/")) return rx.test(path.posix.basename(normalized));
-  return rx.test(normalized);
+  return compileGlobMatcher(glob)(filePath);
 }

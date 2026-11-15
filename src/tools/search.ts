@@ -3,13 +3,13 @@ import { RE2JS } from "re2js";
 import { languageForPath } from "../ast/languages.js";
 import { type Symbol } from "../ast/engine.js";
 import { analyzeFile, readCachedSource } from "../ast/file-cache.js";
-import { listSourceFiles, matchesGlob } from "../util/files.js";
+import { listSourceFiles, compileGlobMatcher } from "../util/files.js";
 import { estimateTokens } from "../util/tokens.js";
 import { makeMeta, type ToolResult } from "./types.js";
 
 const MAX_MATCHES = 200;
 /** Files read concurrently by code_search. */
-const READ_BATCH = 32;
+const READ_BATCH = 64;
 
 interface RawMatch {
   file: string;
@@ -477,10 +477,14 @@ export async function codeSearch(
   fileLimit?: number,
 ): Promise<ToolResult> {
   const { rx, note, plan } = compileQuery(query);
+  // Compile the path glob into a matcher once, instead of recompiling the glob
+  // regex for every file walked.
+  const globMatch = pathGlob ? compileGlobMatcher(pathGlob) : undefined;
+  const globAbsolute = pathGlob !== undefined && path.isAbsolute(pathGlob);
   const { files, truncated: filesTruncated } = await listSourceFiles(root, {
     limit: fileLimit,
-    include: pathGlob
-      ? (file) => matchesGlob(path.isAbsolute(pathGlob) ? file : path.relative(root, file), pathGlob)
+    include: globMatch
+      ? (file) => globMatch(globAbsolute ? file : path.relative(root, file))
       : undefined,
   });
   const fileNote = filesTruncated

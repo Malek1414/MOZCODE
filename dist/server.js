@@ -33062,21 +33062,47 @@ function globToRegex(glob) {
   }
   return new RegExp("^" + rx + "$");
 }
-function matchesGlob(filePath, glob) {
-  const normalized = filePath.split(path2.sep).join("/").replace(/^\.\//, "");
+function compileGlobMatcher(glob) {
   const pattern = glob.split(path2.sep).join("/").replace(/^\.\//, "");
-  if (!/[*?]/.test(pattern)) {
-    const dir = pattern.replace(/\/+$/, "");
-    if (normalized.startsWith(dir + "/")) return true;
-  }
+  const dirPrefix = /[*?]/.test(pattern) ? null : pattern.replace(/\/+$/, "") + "/";
   const rx = globToRegex(pattern);
-  if (!pattern.includes("/")) return rx.test(path2.posix.basename(normalized));
-  return rx.test(normalized);
+  const basenameOnly = !pattern.includes("/");
+  return (filePath) => {
+    const normalized = filePath.split(path2.sep).join("/").replace(/^\.\//, "");
+    if (dirPrefix !== null && normalized.startsWith(dirPrefix)) return true;
+    return basenameOnly ? rx.test(path2.posix.basename(normalized)) : rx.test(normalized);
+  };
 }
 
 // src/tools/search.ts
 var MAX_MATCHES = 200;
-var READ_BATCH = 32;
+var READ_BATCH = 64;
+var FLAG_I = /\(\?[a-zA-Z-]*i[a-zA-Z-]*[:)]/;
+var PURE_LITERAL = /^[ -~]+$/;
+var META = /[\\.^$*+?()\[\]{}]/;
+var NON_ASCII = /[^\x00-\x7f]/;
+function planScan(query) {
+  let ci = false;
+  let body2 = query;
+  if (query.startsWith("(?i)")) {
+    ci = true;
+    body2 = query.slice(4);
+    if (FLAG_I.test(body2)) return void 0;
+  }
+  if (PURE_LITERAL.test(body2) && !META.test(body2)) {
+    const parts2 = body2.split("|");
+    if (parts2.every((x) => x.length > 0)) {
+      return { literals: ci ? parts2.map((x) => x.toLowerCase()) : parts2, pure: true, ci };
+    }
+  }
+  const lits = extractRequiredLiterals(body2);
+  if (lits === void 0) return void 0;
+  if (ci) {
+    for (const l of lits) if (!PURE_LITERAL.test(l)) return void 0;
+    return { literals: lits.map((x) => x.toLowerCase()), pure: false, ci };
+  }
+  return { literals: lits, pure: false, ci };
+}
 function skipClass(pattern, start2) {
   let i2 = start2 + 1;
   if (pattern[i2] === "^") i2++;
@@ -33233,7 +33259,8 @@ function compileQuery(query) {
     return {
       rx: RE2JS.compile(query),
       requiredLiteral: extractRequiredLiteral(query),
-      requiredLiterals: extractRequiredLiterals(query)
+      requiredLiterals: extractRequiredLiterals(query),
+      plan: planScan(query)
     };
   } catch {
     let validJs = false;
@@ -33309,55 +33336,50 @@ function countNewlines(source, from, to) {
   }
   return count;
 }
-function scanWithRequiredLiterals(source, literals, rx, file, matches) {
-  let hits;
-  if (literals.length === 1) {
-    hits = [];
-    const lit = literals[0];
-    let p = source.indexOf(lit);
-    while (p !== -1) {
-      hits.push(p);
-      p = source.indexOf(lit, p + lit.length);
-    }
-  } else {
-    hits = [];
-    for (const lit of literals) {
-      let p = source.indexOf(lit);
-      while (p !== -1) {
-        hits.push(p);
-        p = source.indexOf(lit, p + lit.length);
-      }
-    }
-    hits.sort((a, b) => a - b);
-  }
+function scanWithRequiredLiterals(source, literals, rx, file, matches, pure = false, hay = source) {
+  const k = literals.length;
+  const next = new Array(k);
+  for (let j = 0; j < k; j++) next[j] = hay.indexOf(literals[j]);
   let pos = 0;
   let lineNo = 1;
-  let lastLineEnd = -1;
-  for (let hi = 0; hi < hits.length; hi++) {
-    const h = hits[hi];
-    if (h <= lastLineEnd) continue;
-    const searchFrom = h - 1;
-    const nl = searchFrom < 0 ? -1 : source.lastIndexOf("\n", searchFrom);
+  for (; ; ) {
+    let h = -1;
+    for (let j = 0; j < k; j++) {
+      const v = next[j];
+      if (v !== -1 && (h === -1 || v < h)) h = v;
+    }
+    if (h === -1) return;
+    const nl = h === 0 ? -1 : source.lastIndexOf("\n", h - 1);
     const lineStart = nl + 1;
     lineNo += countNewlines(source, pos, lineStart);
     pos = lineStart;
     let lineEnd = source.indexOf("\n", lineStart);
     if (lineEnd === -1) lineEnd = source.length;
     const line = source.slice(lineStart, lineEnd);
-    if (rx.test(line)) {
-      const m = rx.matcher(line);
-      m.find();
-      matches.push({ file, line: lineNo, text: line.trim(), offset: lineStart + m.start() });
+    if (pure) {
+      matches.push({ file, line: lineNo, text: line.trim(), offset: h });
       if (matches.length >= MAX_MATCHES) return;
+    } else {
+      const m = rx.matcher(line);
+      if (m.find()) {
+        matches.push({ file, line: lineNo, text: line.trim(), offset: lineStart + m.start() });
+        if (matches.length >= MAX_MATCHES) return;
+      }
     }
-    lastLineEnd = lineEnd;
+    if (lineEnd >= source.length) return;
+    const from = lineEnd + 1;
+    for (let j = 0; j < k; j++) {
+      if (next[j] !== -1 && next[j] < from) next[j] = hay.indexOf(literals[j], from);
+    }
   }
 }
 async function codeSearch(root, query, pathGlob, fileLimit) {
-  const { rx, note, requiredLiterals } = compileQuery(query);
+  const { rx, note, plan } = compileQuery(query);
+  const globMatch = pathGlob ? compileGlobMatcher(pathGlob) : void 0;
+  const globAbsolute = pathGlob !== void 0 && path3.isAbsolute(pathGlob);
   const { files: files2, truncated: filesTruncated } = await listSourceFiles(root, {
     limit: fileLimit,
-    include: pathGlob ? (file) => matchesGlob(path3.isAbsolute(pathGlob) ? file : path3.relative(root, file), pathGlob) : void 0
+    include: globMatch ? (file) => globMatch(globAbsolute ? file : path3.relative(root, file)) : void 0
   });
   const fileNote = filesTruncated ? `Only the first ${files2.length} source files were searched (file limit reached); narrow path_glob to search the rest.` : void 0;
   const matches = [];
@@ -33374,8 +33396,15 @@ async function codeSearch(root, query, pathGlob, fileLimit) {
     const file = files2[idx];
     const source = await batch[slot];
     if (source === null) continue;
-    if (requiredLiterals !== void 0) {
-      scanWithRequiredLiterals(source, requiredLiterals, rx, file, matches);
+    if (plan !== void 0 && !plan.ci) {
+      scanWithRequiredLiterals(source, plan.literals, rx, file, matches, plan.pure);
+    } else if (plan !== void 0) {
+      const lower = source.toLowerCase();
+      if (lower.length === source.length && (!NON_ASCII.test(source) || !plan.literals.some((l) => /[ks]/.test(l)))) {
+        scanWithRequiredLiterals(source, plan.literals, rx, file, matches, plan.pure, lower);
+      } else {
+        scanAllLines(source, rx, file, matches);
+      }
     } else {
       scanAllLines(source, rx, file, matches);
     }
