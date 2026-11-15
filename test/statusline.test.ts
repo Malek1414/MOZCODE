@@ -8,6 +8,9 @@ import { spawn } from "node:child_process";
 const here = dirname(fileURLToPath(import.meta.url));
 const statuslinePath = join(here, "..", "dist", "statusline.js");
 
+/** A pid no test writes a pointer for, unless it does so on purpose. */
+const FAKE_CLAUDE_PID = 999_999;
+
 interface Run {
   stdout: string;
   /** ms from spawn until the first byte of output arrived. */
@@ -20,13 +23,15 @@ interface Run {
  * Run the statusline exactly the way Claude Code does: spawn it, write the
  * update JSON on stdin, close stdin, and read stdout until the process exits.
  */
-function runStatusline(home: string, cwd: string, projectDir?: string): Promise<Run> {
+function runStatusline(home: string, cwd: string, projectDir?: string, claudePid = FAKE_CLAUDE_PID): Promise<Run> {
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
     let stdout = "";
     let firstByteMs = -1;
     const child = spawn("node", ["--no-warnings", statuslinePath], {
-      env: { ...process.env, MOZCODE_HOME: home },
+      // A fixed Claude pid keeps the result independent of whether the tests
+      // themselves run inside Claude Code.
+      env: { ...process.env, MOZCODE_HOME: home, MOZCODE_CLAUDE_PID: String(claudePid) },
       stdio: ["pipe", "pipe", "ignore"],
     });
     child.stdout.setEncoding("utf8");
@@ -70,6 +75,12 @@ async function writeSessionPointer(home: string, project: string, session: strin
   const { createHash } = await import("node:crypto");
   const hash = createHash("sha1").update(project).digest("hex").slice(0, 12);
   await fs.writeFile(join(dir, `${hash}.session`), session, "utf8");
+}
+
+async function writeProcessPointer(home: string, claudePid: number, session: string) {
+  const dir = join(home, "sessions");
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(join(dir, `pid-${claudePid}.session`), session, "utf8");
 }
 
 describe("statusline", () => {
@@ -147,5 +158,27 @@ describe("statusline", () => {
     // Without workspace.project_dir, the nearest recorded ancestor is used.
     const viaAncestor = plain((await runStatusline(home, `${project}/src/deep`)).stdout);
     expect(viaAncestor.split("│")[0]).toContain("2.0k tokens");
+  });
+
+  it("shows its own window's session when another window in the project started later", async () => {
+    // Two Claude windows in one project: the per-project pointer names the
+    // window that started last, but each statusline must show its own server.
+    await appendEntry(home, project, session, 1000);
+    await appendEntry(home, project, "sess-mine", 7000);
+    await writeProcessPointer(home, 4242, "sess-mine");
+
+    const mine = plain((await runStatusline(home, project, undefined, 4242)).stdout).split("│")[0];
+    expect(mine).toContain("session:");
+    expect(mine).toContain("7.0k tokens");
+
+    const other = plain((await runStatusline(home, project)).stdout).split("│")[0];
+    expect(other).toContain("1.0k tokens");
+  });
+
+  it("does not borrow another window's session while its own has no calls yet", async () => {
+    await appendEntry(home, project, session, 1000);
+    await writeProcessPointer(home, 4242, "sess-fresh");
+    const first = plain((await runStatusline(home, project, undefined, 4242)).stdout).split("│")[0];
+    expect(first).toContain("today:");
   });
 });

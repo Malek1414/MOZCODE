@@ -21,6 +21,17 @@ function sessionPointerFile(project) {
   const hash = crypto.createHash("sha1").update(project).digest("hex").slice(0, 12);
   return path.join(sessionsDir(), `${hash}.session`);
 }
+function processPointerFile(claudePid) {
+  return path.join(sessionsDir(), `pid-${claudePid}.session`);
+}
+async function readProcessSession(claudePid) {
+  try {
+    const s = (await fs.readFile(processPointerFile(claudePid), "utf8")).trim();
+    return s || void 0;
+  } catch {
+    return void 0;
+  }
+}
 async function readCurrentSession(project) {
   try {
     const s = (await fs.readFile(sessionPointerFile(project), "utf8")).trim();
@@ -33,6 +44,28 @@ function isMeteringEntry(v) {
   if (!v || typeof v !== "object") return false;
   const e = v;
   return typeof e.ts === "string" && typeof e.session === "string" && typeof e.project === "string" && typeof e.tool === "string" && (e.path === void 0 || typeof e.path === "string") && Number.isFinite(e.baselineTokens) && Number.isFinite(e.actualTokens) && Number.isFinite(e.savedTokens);
+}
+
+// src/util/claude-process.ts
+import { execFile } from "node:child_process";
+var CLAUDE_COMMAND = /(^|\/)claude(\.exe)?(\s|$)|@anthropic-ai\/claude-code\//;
+var psLookup = (pid) => new Promise((resolve) => {
+  if (process.platform === "win32") return resolve(void 0);
+  execFile("ps", ["-o", "ppid=,command=", "-p", String(pid)], { timeout: 500 }, (err, stdout) => {
+    if (err) return resolve(void 0);
+    const m = /^\s*(\d+)\s+(.*)$/.exec(stdout.split("\n")[0] ?? "");
+    resolve(m ? { ppid: Number(m[1]), command: m[2] } : void 0);
+  });
+});
+async function claudeAncestor(start, lookup = psLookup, maxDepth = 6) {
+  let pid = start;
+  for (let i = 0; i < maxDepth && pid > 1; i++) {
+    const info = await lookup(pid);
+    if (!info) return void 0;
+    if (CLAUDE_COMMAND.test(info.command)) return pid;
+    pid = info.ppid;
+  }
+  return void 0;
 }
 
 // src/metering/rollup.ts
@@ -284,6 +317,11 @@ async function resolveProject(candidates, projects) {
   }
   return candidates[0];
 }
+async function ownServerSession() {
+  const override = Number(process.env.MOZCODE_CLAUDE_PID);
+  const claudePid = override > 0 ? override : await claudeAncestor(process.ppid);
+  return claudePid ? readProcessSession(claudePid) : void 0;
+}
 async function main() {
   const candidates = [];
   try {
@@ -294,12 +332,22 @@ async function main() {
   } catch {
   }
   if (candidates.length === 0) candidates.push(process.cwd());
-  const projects = await loadRollup();
+  const [projects, processSession] = await Promise.all([loadRollup(), ownServerSession()]);
   const project = await resolveProject(candidates, projects);
   const all = { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
   for (const p of Object.values(projects)) mergeTotals(all, p.total);
-  const sessionId = await readCurrentSession(project);
-  const sessionTotals = sessionId ? projects[project]?.sessions[sessionId] : void 0;
+  let sessionTotals;
+  if (processSession) {
+    for (const p of Object.values(projects)) {
+      if (p.sessions[processSession]) {
+        sessionTotals = p.sessions[processSession];
+        break;
+      }
+    }
+  } else {
+    const sessionId = await readCurrentSession(project);
+    sessionTotals = sessionId ? projects[project]?.sessions[sessionId] : void 0;
+  }
   let first;
   if (sessionTotals && sessionTotals.calls > 0) {
     first = `session: ${segment(sessionTotals)}`;

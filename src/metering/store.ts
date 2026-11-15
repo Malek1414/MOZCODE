@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import * as fsSync from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
@@ -80,6 +81,44 @@ export async function writeCurrentSession(project: string, session: string): Pro
     await fs.writeFile(sessionPointerFile(project), session, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
   } catch {
     // Pointer is a convenience; the statusline falls back to the latest entry.
+  }
+}
+
+function processPointerFile(claudePid: number): string {
+  return path.join(sessionsDir(), `pid-${claudePid}.session`);
+}
+
+/**
+ * Record the metering session of the MCP server running under one Claude Code
+ * process. Unlike the per-project pointer, this survives several Claude windows
+ * open in the same project: each window's statusline reads its own server's session.
+ */
+export async function writeProcessSession(claudePid: number, session: string): Promise<void> {
+  try {
+    await fs.mkdir(sessionsDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
+    await fs.writeFile(processPointerFile(claudePid), session, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+  } catch {
+    // Convenience only; the statusline falls back to the per-project pointer.
+  }
+}
+
+/** The metering session published for a Claude Code process, or undefined. */
+export async function readProcessSession(claudePid: number): Promise<string | undefined> {
+  try {
+    const s = (await fs.readFile(processPointerFile(claudePid), "utf8")).trim();
+    return s || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Remove this server's process pointer on exit, unless another server has since taken it over. */
+export function removeProcessSessionSync(claudePid: number, session: string): void {
+  try {
+    const file = processPointerFile(claudePid);
+    if (fsSync.readFileSync(file, "utf8").trim() === session) fsSync.unlinkSync(file);
+  } catch {
+    // Already gone or unreadable; nothing to clean up.
   }
 }
 

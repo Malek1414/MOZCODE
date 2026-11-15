@@ -5,7 +5,8 @@
 // We only need the project directory to scope "this session" to the active project.
 //
 // All figures are ESTIMATES against a naive-tool counterfactual — never billing.
-import { readCurrentSession } from "./metering/store.js";
+import { readCurrentSession, readProcessSession } from "./metering/store.js";
+import { claudeAncestor } from "./util/claude-process.js";
 import { loadRollup, localDay, mergeTotals, totalsToSummary, type ProjectRollup, type Totals } from "./metering/rollup.js";
 import { computeMetrics, fmtUsd, fmtDuration } from "./dashboard/metrics.js";
 import * as path from "node:path";
@@ -74,6 +75,17 @@ async function resolveProject(candidates: string[], projects: Record<string, Pro
   return candidates[0];
 }
 
+/**
+ * The metering session published by the MCP server running under the same
+ * Claude Code process as this statusline. MOZCODE_CLAUDE_PID overrides the
+ * process lookup (used by tests).
+ */
+async function ownServerSession(): Promise<string | undefined> {
+  const override = Number(process.env.MOZCODE_CLAUDE_PID);
+  const claudePid = override > 0 ? override : await claudeAncestor(process.ppid);
+  return claudePid ? readProcessSession(claudePid) : undefined;
+}
+
 async function main(): Promise<void> {
   const candidates: string[] = [];
   try {
@@ -87,17 +99,29 @@ async function main(): Promise<void> {
   if (candidates.length === 0) candidates.push(process.cwd());
 
   // Incremental totals: only ledger bytes appended since the last refresh are parsed.
-  const projects = await loadRollup();
+  // The Claude process lookup spawns `ps`, so run it alongside the rollup.
+  const [projects, processSession] = await Promise.all([loadRollup(), ownServerSession()]);
   const project = await resolveProject(candidates, projects);
   const all: Totals = { calls: 0, baseline: 0, actual: 0, saved: 0, tools: {} };
   for (const p of Object.values(projects)) mergeTotals(all, p.total);
 
-  // "This session" = the active metering session for this project, which the
-  // server publishes on startup. Until that session has made a MOZCODE call, a
-  // $0.00 session segment says nothing, so show today's savings across every
-  // project instead.
-  const sessionId = await readCurrentSession(project);
-  const sessionTotals = sessionId ? projects[project]?.sessions[sessionId] : undefined;
+  // "This session" = the metering session of the MCP server in this Claude
+  // window. Prefer the pointer keyed by the Claude process: the per-project
+  // pointer belongs to whichever window in this project started last. Until
+  // that session has made a MOZCODE call, a $0.00 session segment says
+  // nothing, so show today's savings across every project instead.
+  let sessionTotals: Totals | undefined;
+  if (processSession) {
+    for (const p of Object.values(projects)) {
+      if (p.sessions[processSession]) {
+        sessionTotals = p.sessions[processSession];
+        break;
+      }
+    }
+  } else {
+    const sessionId = await readCurrentSession(project);
+    sessionTotals = sessionId ? projects[project]?.sessions[sessionId] : undefined;
+  }
   let first: string;
   if (sessionTotals && sessionTotals.calls > 0) {
     first = `session: ${segment(sessionTotals)}`;
